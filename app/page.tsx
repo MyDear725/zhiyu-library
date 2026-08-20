@@ -1,0 +1,1343 @@
+"use client";
+
+import { FormEvent, useEffect, useMemo, useState } from "react";
+
+type View = "home" | "seats" | "books" | "mine";
+type BookCategory = "全部" | "文学" | "社科" | "设计" | "科技";
+
+type User = { id: number; studentId: string; name: string };
+type SeatStatus = "free" | "using" | "away";
+type SeatRecord = {
+  id: number;
+  floor: string;
+  label: string;
+  zone: string;
+  status: SeatStatus;
+  mapX: number;
+  mapY: number;
+  updatedAt: string;
+};
+type ReservationRecord = {
+  id: number;
+  bookingDate: string;
+  timeSlot: string;
+  floor: string;
+  seatLabel: string;
+  zone: string;
+};
+
+type StudyPurpose = "focus" | "discuss" | "read" | "other";
+type StudyTopic = "tech" | "design" | "competition" | "course" | "other";
+type StudyIntentResult = {
+  purpose: StudyPurpose;
+  topic: StudyTopic | null;
+  recommendation: {
+    floor: string;
+    zone: string;
+    zoneName: string;
+    reason: string;
+    peerCount: number;
+  };
+};
+
+type Book = {
+  id: number;
+  title: string;
+  author: string;
+  category: Exclude<BookCategory, "全部">;
+  callNumber: string;
+  location: string;
+  available: number;
+  total: number;
+  color: string;
+  mark: string;
+  description: string;
+};
+
+const books: Book[] = [
+  {
+    id: 1,
+    title: "百年孤独",
+    author: "加西亚·马尔克斯",
+    category: "文学",
+    callNumber: "I775.45 / 12",
+    location: "三层文学区 · 18架",
+    available: 2,
+    total: 4,
+    color: "ochre",
+    mark: "百年",
+    description: "以马孔多家族七代人的故事，书写孤独、记忆与拉丁美洲的百年历史。",
+  },
+  {
+    id: 2,
+    title: "置身事内：中国政府与经济发展",
+    author: "兰小欢",
+    category: "社科",
+    callNumber: "F12 / 286",
+    location: "四层社科区 · 07架",
+    available: 3,
+    total: 6,
+    color: "brick",
+    mark: "事内",
+    description: "从地方政府运行机制出发，理解中国经济发展中的现实逻辑。",
+  },
+  {
+    id: 3,
+    title: "设计心理学",
+    author: "唐纳德·诺曼",
+    category: "设计",
+    callNumber: "TB47 / 91",
+    location: "二层艺术区 · 12架",
+    available: 1,
+    total: 3,
+    color: "navy",
+    mark: "设计",
+    description: "从日常物品出发，解释可见性、反馈、映射和以人为本的设计原则。",
+  },
+  {
+    id: 4,
+    title: "芯片战争：世界最关键技术的争夺战",
+    author: "克里斯·米勒",
+    category: "科技",
+    callNumber: "TN4 / 203",
+    location: "五层科技区 · 24架",
+    available: 0,
+    total: 5,
+    color: "green",
+    mark: "芯片",
+    description: "梳理半导体产业的发展、全球分工以及技术竞争背后的地缘格局。",
+  },
+  {
+    id: 5,
+    title: "额尔古纳河右岸",
+    author: "迟子建",
+    category: "文学",
+    callNumber: "I247.57 / 844",
+    location: "三层文学区 · 26架",
+    available: 4,
+    total: 7,
+    color: "forest",
+    mark: "右岸",
+    description: "以一位鄂温克族老人的口吻，讲述民族迁徙、自然与生命的故事。",
+  },
+  {
+    id: 6,
+    title: "人类简史：从动物到上帝",
+    author: "尤瓦尔·赫拉利",
+    category: "社科",
+    callNumber: "K02 / 117",
+    location: "四层社科区 · 02架",
+    available: 2,
+    total: 8,
+    color: "sand",
+    mark: "简史",
+    description: "从认知革命、农业革命到科技革命，重新审视人类社会的发展路径。",
+  },
+  {
+    id: 7,
+    title: "乡土中国",
+    author: "费孝通",
+    category: "社科",
+    callNumber: "C912.82 / 31",
+    location: "四层社科区 · 11架",
+    available: 5,
+    total: 9,
+    color: "ochre",
+    mark: "乡土",
+    description: "从乡土社会的结构、秩序与人际关系出发，理解中国社会的基本肌理。",
+  },
+  {
+    id: 8,
+    title: "月亮与六便士",
+    author: "威廉·萨默塞特·毛姆",
+    category: "文学",
+    callNumber: "I561.45 / 182",
+    location: "三层文学区 · 09架",
+    available: 3,
+    total: 6,
+    color: "navy",
+    mark: "月亮",
+    description: "借一位画家的出走，追问理想、世俗生活与个人选择之间的张力。",
+  },
+  {
+    id: 9,
+    title: "创新者的窘境",
+    author: "克莱顿·克里斯坦森",
+    category: "设计",
+    callNumber: "F273.1 / 76",
+    location: "二层创新区 · 05架",
+    available: 2,
+    total: 4,
+    color: "brick",
+    mark: "创新",
+    description: "解释成熟组织为何会错失破坏式创新，以及产品与组织如何面对技术跃迁。",
+  },
+  {
+    id: 10,
+    title: "艺术的故事",
+    author: "E.H.贡布里希",
+    category: "设计",
+    callNumber: "J110.9 / 48",
+    location: "二层艺术区 · 03架",
+    available: 1,
+    total: 3,
+    color: "sand",
+    mark: "艺术",
+    description: "沿着艺术史的重要节点，理解视觉表达、审美观念与时代语境的变化。",
+  },
+  {
+    id: 11,
+    title: "浪潮之巅",
+    author: "吴军",
+    category: "科技",
+    callNumber: "F49 / 164",
+    location: "五层科技区 · 18架",
+    available: 4,
+    total: 5,
+    color: "green",
+    mark: "浪潮",
+    description: "以产业史视角回看科技公司的兴衰，理解技术浪潮与商业选择。",
+  },
+  {
+    id: 12,
+    title: "乌合之众",
+    author: "古斯塔夫·勒庞",
+    category: "社科",
+    callNumber: "C912.64 / 22",
+    location: "四层社科区 · 15架",
+    available: 2,
+    total: 7,
+    color: "forest",
+    mark: "群体",
+    description: "从群体心理切入，讨论个体在群体中的判断、情绪与行动方式。",
+  },
+];
+
+const relatedBookIds: Record<number, number[]> = {
+  1: [6, 7, 10],
+  2: [3, 4, 9],
+  3: [4, 2, 11],
+  4: [2, 9, 6],
+  5: [7, 6, 10],
+  6: [4, 3, 10],
+  7: [5, 3, 4],
+  8: [10, 3, 7],
+  9: [11, 2, 6],
+  10: [8, 6, 4],
+  11: [9, 2, 7],
+  12: [3, 4, 8],
+};
+
+const knowledgeThreads: Record<number, string[]> = {
+  1: ["家族记忆", "拉美历史", "魔幻现实"],
+  2: ["政府运行", "区域经济", "制度设计"],
+  3: ["认知心理", "产品体验", "人机交互"],
+  4: ["半导体", "产业政策", "国际关系"],
+  5: ["民族叙事", "生态文学", "现代化"],
+  6: ["文明演化", "经济制度", "科技革命"],
+  7: ["社会结构", "文化传统", "城乡变迁"],
+  8: ["艺术理想", "个体选择", "社会规范"],
+  9: ["破坏式创新", "组织管理", "技术周期"],
+  10: ["艺术史", "视觉表达", "时代文化"],
+  11: ["科技产业", "商业模式", "创新周期"],
+  12: ["群体心理", "传播机制", "社会行为"],
+};
+
+const similarityReasons: Record<string, string> = {
+  "1-5": "都以个人与家族记忆书写时代变迁",
+  "1-8": "都关注个人选择与现实生活之间的冲突",
+  "5-8": "都通过人物命运追问理想与归属",
+  "2-6": "都从宏观视角解释社会与经济如何演变",
+  "2-7": "都从中国社会结构出发理解现实运行逻辑",
+  "2-12": "都关注制度环境如何影响群体行为",
+  "6-7": "都从历史与社会结构解释文明的发展",
+  "6-12": "都试图理解群体如何塑造人类社会",
+  "7-12": "都关注社会关系与群体行为的形成",
+  "3-9": "都讨论产品决策与创新如何回应真实需求",
+  "3-10": "都帮助理解视觉感受与审美判断的形成",
+  "9-10": "都呈现观念变化如何推动行业革新",
+  "4-11": "都以产业史梳理关键技术与公司的兴衰",
+};
+
+const readingQuizQuestions = [
+  {
+    label: "阅读期待",
+    question: "今天更想从一本书里得到什么？",
+    options: [
+      { title: "沉浸在一个好故事里", note: "跟随人物进入另一段人生", bookIds: [1, 5, 8] },
+      { title: "更好地理解现实世界", note: "看懂社会、经济与人的选择", bookIds: [2, 7, 12, 6] },
+      { title: "获得设计与创新灵感", note: "发现产品、艺术与创意方法", bookIds: [3, 9, 10] },
+      { title: "了解科技与未来趋势", note: "追踪技术、产业与时代变化", bookIds: [4, 11, 6] },
+    ],
+  },
+  {
+    label: "内容偏好",
+    question: "哪类内容更容易吸引你？",
+    options: [
+      { title: "人物、情感与命运", note: "从具体的人生感受世界", bookIds: [1, 5, 8, 12] },
+      { title: "社会、历史与制度", note: "理解现实背后的运行逻辑", bookIds: [2, 6, 7, 12] },
+      { title: "产品、艺术与创意", note: "关注体验、表达与创新", bookIds: [3, 10, 9, 11] },
+      { title: "技术、商业与产业", note: "观察技术浪潮如何发生", bookIds: [4, 11, 9, 2] },
+    ],
+  },
+  {
+    label: "阅读节奏",
+    question: "你希望这次阅读是什么节奏？",
+    options: [
+      { title: "轻松进入，顺畅读完", note: "希望内容好读、有吸引力", bookIds: [8, 7, 11, 3] },
+      { title: "慢下来，感受与思考", note: "愿意留时间体会细节", bookIds: [1, 5, 10, 12] },
+      { title: "建立完整的知识框架", note: "希望系统理解一个主题", bookIds: [2, 4, 6, 9] },
+    ],
+  },
+];
+
+const quizRecommendationCopy: Record<number, string> = {
+  1: "家族传奇与魔幻现实交织，适合想沉浸在宏大故事中的你。",
+  2: "从真实运行机制理解中国经济，观点清晰且贴近现实。",
+  3: "用日常案例解释设计原则，适合寻找产品与创新灵感。",
+  4: "从半导体切入全球产业竞争，适合关注科技趋势的读者。",
+  5: "以细腻叙事连接民族、自然与时代，适合安静慢读。",
+  6: "用宏观框架串联文明演化，适合建立系统性的历史视角。",
+  7: "篇幅精炼、观点经典，是理解中国社会结构的轻盈入口。",
+  8: "故事流畅而富有思考，适合关注理想与个人选择的读者。",
+  9: "用成熟案例解释创新困境，适合关注产品与组织变化的人。",
+  10: "沿艺术史理解视觉表达，适合拓展审美与创意视野。",
+  11: "以科技公司兴衰讲述产业浪潮，内容清晰且富有故事性。",
+  12: "从群体心理观察社会行为，适合对人与群体关系好奇的你。",
+};
+
+const floorInfo = [
+  { floor: "一层", code: "1F", free: 42, total: 96, note: "综合阅览区" },
+  { floor: "二层", code: "2F", free: 85, total: 160, note: "人文与艺术" },
+  { floor: "三层", code: "3F", free: 128, total: 220, note: "静音自习区" },
+  { floor: "四层", code: "4F", free: 57, total: 112, note: "社科与研修" },
+];
+
+const studyPurposes: { value: StudyPurpose; index: string; label: string; note: string }[] = [
+  { value: "focus", index: "01", label: "专注自习", note: "安静完成个人任务" },
+  { value: "discuss", index: "02", label: "讨论解题", note: "与同伴共同解决问题" },
+  { value: "read", index: "03", label: "阅读查找", note: "阅读或检索资料" },
+  { value: "other", index: "04", label: "其他安排", note: "更灵活的空间需求" },
+];
+
+const studyTopics: { value: StudyTopic; label: string }[] = [
+  { value: "tech", label: "编程与技术" },
+  { value: "design", label: "产品与设计" },
+  { value: "competition", label: "竞赛项目" },
+  { value: "course", label: "课程作业" },
+  { value: "other", label: "其他问题" },
+];
+
+function floorName(code: string) {
+  return ({ "1F": "一层", "2F": "二层", "3F": "三层", "4F": "四层" } as Record<string, string>)[code] ?? code;
+}
+
+function LibraryMark() {
+  return (
+    <span className="library-mark" aria-hidden="true">
+      <i />
+      <i />
+      <i />
+    </span>
+  );
+}
+
+function AuthView({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [studentId, setStudentId] = useState("");
+  const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    if (mode === "register" && password !== confirmPassword) {
+      setError("两次输入的密码不一致");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const response = await fetch(`/api/auth/${mode}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId, name, password }),
+      });
+      const data = await response.json() as { user?: User; error?: string };
+      if (!response.ok || !data.user) throw new Error(data.error || "操作失败，请稍后重试");
+      onAuthenticated(data.user);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "操作失败，请稍后重试");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function switchMode(nextMode: "login" | "register") {
+    setMode(nextMode);
+    setError("");
+    setPassword("");
+    setConfirmPassword("");
+  }
+
+  return (
+    <main className="auth-page">
+      <section className="auth-intro">
+        <div className="auth-brand"><LibraryMark /><span><strong>知遇图书馆</strong><small>大连理工大学 · 总馆</small></span></div>
+        <div className="auth-message"><span>欢迎回来</span><h1>一张座位，<br />一本好书。</h1><p>登录后可以浏览馆舍地图、在线选座，并保存自己的借阅清单。</p></div>
+        <div className="auth-hours"><span>今日开放</span><strong>08:00—22:00</strong><small>总馆当前有 312 个空闲座位</small></div>
+      </section>
+
+      <section className="auth-form-wrap">
+        <form className="auth-form" onSubmit={submit}>
+          <div className="auth-form-heading"><span>{mode === "login" ? "学生登录" : "首次注册"}</span><h2>{mode === "login" ? "登录图书馆账户" : "创建你的账户"}</h2><p>{mode === "login" ? "使用学号和密码继续" : "注册后，预约和借阅记录会与你的学号绑定"}</p></div>
+          <div className="auth-tabs" role="tablist"><button type="button" className={mode === "login" ? "active" : ""} onClick={() => switchMode("login")}>登录</button><button type="button" className={mode === "register" ? "active" : ""} onClick={() => switchMode("register")}>注册</button></div>
+          {mode === "register" && <label><span>姓名</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="请输入真实姓名" autoComplete="name" required /></label>}
+          <label><span>学号</span><input value={studentId} onChange={(event) => setStudentId(event.target.value.replace(/\D/g, ""))} placeholder="请输入 8—12 位学号" inputMode="numeric" autoComplete="username" required /></label>
+          <label><span>密码</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={mode === "register" ? "至少 8 位" : "请输入密码"} autoComplete={mode === "login" ? "current-password" : "new-password"} required /></label>
+          {mode === "register" && <label><span>确认密码</span><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="再次输入密码" autoComplete="new-password" required /></label>}
+          {error && <div className="auth-error" role="alert">{error}</div>}
+          <button className="auth-submit" type="submit" disabled={submitting}>{submitting ? "请稍候…" : mode === "login" ? "登录" : "注册并登录"}</button>
+          <p className="auth-security">密码经加盐摘要后存储，系统不会保存明文密码。</p>
+        </form>
+      </section>
+    </main>
+  );
+}
+
+function Header({ view, setView, user, onLogout }: { view: View; setView: (view: View) => void; user: User; onLogout: () => void }) {
+  const nav: Array<{ id: View; label: string }> = [
+    { id: "home", label: "首页" },
+    { id: "books", label: "借书" },
+    { id: "seats", label: "占座" },
+    { id: "mine", label: "我的" },
+  ];
+
+  return (
+    <header className="site-header">
+      <div className="header-inner">
+        <button className="site-brand" onClick={() => setView("home")} aria-label="返回首页">
+          <LibraryMark />
+          <span>
+            <strong>知遇图书馆</strong>
+            <small>大连理工大学 · 总馆</small>
+          </span>
+        </button>
+
+        <nav className="site-nav" aria-label="主要服务">
+          {nav.map((item) => (
+            <button
+              key={item.id}
+              className={view === item.id ? "active" : ""}
+              onClick={() => setView(item.id)}
+              aria-current={view === item.id ? "page" : undefined}
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="header-user">
+          <button className="account-button" onClick={() => setView("mine")}><span><strong>{user.name}</strong><small>{user.studentId}</small></span><i>{user.name.slice(0, 1)}</i></button>
+          <button className="logout-button" onClick={onLogout}>退出</button>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function BookCover({ book, small = false }: { book: Book; small?: boolean }) {
+  return (
+    <div className={`book-cover ${book.color} ${small ? "small" : ""}`} aria-hidden="true">
+      <span>大工图书馆</span>
+      <strong>{book.mark}</strong>
+      <i>{book.author}</i>
+    </div>
+  );
+}
+
+function HomeView({
+  setView,
+  user,
+}: {
+  setView: (view: View) => void;
+  user: User;
+}) {
+  return (
+    <main className="page choice-home">
+      <section className="choice-heading">
+        <span>下午好，{user.name}</span>
+        <h1>今天想做什么？</h1>
+        <p>选择一项服务</p>
+      </section>
+
+      <section className="intent-grid" aria-label="选择图书馆服务">
+        <button className="intent-card borrow-intent" onClick={() => setView("books")}>
+          <div className="intent-copy">
+            <span className="intent-index">01 · 借书</span>
+            <h2>借一本书</h2>
+            <p>搜索馆藏，同时发现相似书籍与相关领域。</p>
+          </div>
+          <span className="intent-arrow" aria-hidden="true">→</span>
+        </button>
+
+        <button className="intent-card seat-intent" onClick={() => setView("seats")}>
+          <div className="intent-copy">
+            <span className="intent-index">02 · 占座</span>
+            <h2>选一个座位</h2>
+            <p>浏览楼层地图，查看座位状态并自由选择。</p>
+          </div>
+          <span className="intent-arrow" aria-hidden="true">→</span>
+        </button>
+      </section>
+    </main>
+  );
+}
+
+function SeatMap({
+  seats,
+  selected,
+  setSelected,
+  zoom,
+  recommendedZone,
+}: {
+  seats: SeatRecord[];
+  selected: number | null;
+  setSelected: (seat: number) => void;
+  zoom: number;
+  recommendedZone?: string | null;
+}) {
+  function seatStatusText(status: SeatStatus) {
+    return status === "using" ? "使用中" : status === "away" ? "暂离" : "空闲";
+  }
+
+  return (
+    <div className="map-viewport">
+      <div className="floor-plan" style={{ transform: `scale(${zoom})` }}>
+        <div className="window-wall" aria-hidden="true">
+          <span>北侧临窗采光带</span>
+          <div>{[0, 1, 2, 3, 4, 5, 6, 7].map((window) => <i key={window} />)}</div>
+          <small>安静阅读 · 自然采光</small>
+        </div>
+
+        <div className="floor-plan-body">
+          <aside className="plan-room-rail" aria-label="西侧馆舍设施">
+            <div className="plan-direction"><span>N</span><i>↑</i></div>
+            <div className="plan-room stair-room"><i /><strong>楼梯</strong><small>安全出口</small></div>
+            <div className="plan-room lift-room"><i>↕</i><strong>电梯厅</strong><small>无障碍通行</small></div>
+            <div className="plan-room shelf-room"><div><i /><i /><i /><i /></div><strong>开架书库</strong><small>综合类图书</small></div>
+            <div className="plan-room quiet-room"><span>静</span><strong>静音室</strong><small>请勿交谈</small></div>
+          </aside>
+
+          <section className="plan-study-area">
+            <div className="study-area-heading">
+              <div><span>主阅览区</span><strong>自由选座</strong></div>
+              <small>座位均配有电源与阅读灯</small>
+            </div>
+
+            <div className="plan-zones">
+              {["A", "B", "C"].map((zone) => {
+                const zoneSeats = seats.filter((seat) => seat.zone === zone);
+                const freeCount = zoneSeats.filter((seat) => seat.status === "free").length;
+                const clusters = Array.from({ length: 4 }, (_, index) => zoneSeats.slice(index * 4, index * 4 + 4));
+                return (
+                  <section className={`plan-zone${recommendedZone === zone ? " recommended-zone" : ""}`} key={zone} aria-label={`${zone}区座位${recommendedZone === zone ? "，系统推荐区域" : ""}`}>
+                    <header><div><b>{zone}</b><span>{zone === "A" ? "临窗区" : zone === "B" ? "中央区" : "静音区"}</span></div><small>{freeCount} 个空位</small></header>
+                    <div className="table-clusters">
+                      {clusters.map((cluster, clusterIndex) => (
+                        <div className="table-cluster" key={`${zone}-${clusterIndex}`}>
+                          <span className="study-table" aria-hidden="true"><i />T{String(clusterIndex + 1).padStart(2, "0")}<i /></span>
+                          {cluster.map((seat, seatIndex) => {
+                            const statusText = seatStatusText(seat.status);
+                            return (
+                              <button
+                                key={seat.id}
+                                disabled={seat.status !== "free"}
+                                className={`cluster-seat seat-pos-${seatIndex} ${selected === seat.id ? "selected" : seat.status}`}
+                                onClick={() => setSelected(seat.id)}
+                                aria-label={`${seat.label} ${statusText}`}
+                                title={`${seat.label} · ${statusText}`}
+                              >
+                                <span>{seat.label}</span>
+                                <small>{selected === seat.id ? "已选" : statusText}</small>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          </section>
+
+          <aside className="plan-utility-rail" aria-label="东侧馆舍设施">
+            <div className="utility-room service-desk"><span>i</span><strong>服务台</strong><small>咨询 · 借还</small></div>
+            <div className="utility-room print-room"><span>▤</span><strong>自助打印</strong><small>打印 · 扫描</small></div>
+            <div className="utility-room water-room"><span>≈</span><strong>饮水处</strong><small>冷热饮水</small></div>
+            <div className="utility-room restroom"><span>WC</span><strong>洗手间</strong><small>东侧通道</small></div>
+          </aside>
+        </div>
+
+        <div className="plan-entrance"><span><i />主入口</span><p>公共通道 · 请保持畅通</p><span>安全出口<i /></span></div>
+      </div>
+    </div>
+  );
+}
+
+function SeatsView({
+  reservation,
+  onReservationChange,
+  showToast,
+}: {
+  reservation: ReservationRecord | null;
+  onReservationChange: (reservation: ReservationRecord | null) => void;
+  showToast: (message: string) => void;
+}) {
+  const [floor, setFloor] = useState("3F");
+  const [seats, setSeats] = useState<SeatRecord[]>([]);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [time, setTime] = useState("14:30—18:00");
+  const [expandedZoom, setExpandedZoom] = useState(1.15);
+  const [mapExpanded, setMapExpanded] = useState(false);
+  const [loadingSeats, setLoadingSeats] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [studyPurpose, setStudyPurpose] = useState<StudyPurpose | null>(null);
+  const [studyTopic, setStudyTopic] = useState<StudyTopic | null>(null);
+  const [intentResult, setIntentResult] = useState<StudyIntentResult | null>(null);
+  const [intentLoading, setIntentLoading] = useState(true);
+  const [intentSaving, setIntentSaving] = useState(false);
+  const selectedSeat = seats.find((seat) => seat.id === selected) ?? null;
+  const currentFloorName = floorInfo.find((item) => item.code === floor)?.floor || "三层";
+
+  useEffect(() => {
+    let active = true;
+    setLoadingSeats(true);
+    setSelected(null);
+    fetch(`/api/seats?floor=${floor}`)
+      .then(async (response) => {
+        const data = await response.json() as { seats?: SeatRecord[]; error?: string };
+        if (!response.ok) throw new Error(data.error || "无法读取座位状态");
+        if (active) setSeats(data.seats ?? []);
+      })
+      .catch((error) => showToast(error instanceof Error ? error.message : "无法读取座位状态"))
+      .finally(() => { if (active) setLoadingSeats(false); });
+    return () => { active = false; };
+  }, [floor]);
+
+  useEffect(() => {
+    if (!mapExpanded) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMapExpanded(false);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [mapExpanded]);
+
+  useEffect(() => {
+    let active = true;
+    setIntentLoading(true);
+    fetch(`/api/study-intent?bookingDate=2026-08-20&timeSlot=${encodeURIComponent(time)}`)
+      .then(async (response) => {
+        const data = await response.json() as { intent?: StudyIntentResult | null; error?: string };
+        if (!response.ok) throw new Error(data.error || "无法读取学习场景");
+        if (!active) return;
+        setIntentResult(data.intent ?? null);
+        setStudyPurpose(data.intent?.purpose ?? null);
+        setStudyTopic(data.intent?.topic ?? null);
+      })
+      .catch((error) => { if (active) showToast(error instanceof Error ? error.message : "无法读取学习场景"); })
+      .finally(() => { if (active) setIntentLoading(false); });
+    return () => { active = false; };
+  }, [time]);
+
+  const statusCounts = useMemo(() => ({
+    free: seats.filter((seat) => seat.status === "free").length,
+    using: seats.filter((seat) => seat.status === "using").length,
+    away: seats.filter((seat) => seat.status === "away").length,
+  }), [seats]);
+
+  async function confirmReservation() {
+    if (!selectedSeat || saving) return;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/reservations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seatId: selectedSeat.id, bookingDate: "2026-08-20", timeSlot: time }),
+      });
+      const data = await response.json() as { reservation?: ReservationRecord; error?: string };
+      if (!response.ok || !data.reservation) throw new Error(data.error || "预约失败");
+      onReservationChange(data.reservation);
+      showToast(`已预约 ${floorName(data.reservation.floor)} ${data.reservation.seatLabel}，使用时间 ${time}`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "预约失败");
+      const refreshed = await fetch(`/api/seats?floor=${floor}`);
+      if (refreshed.ok) setSeats(((await refreshed.json()) as { seats: SeatRecord[] }).seats);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function cancelReservation() {
+    const response = await fetch("/api/reservations", { method: "DELETE" });
+    if (response.ok) {
+      onReservationChange(null);
+      showToast("当前座位预约已取消");
+    }
+  }
+
+  function chooseStudyPurpose(purpose: StudyPurpose) {
+    setStudyPurpose(purpose);
+    if (purpose !== "discuss") setStudyTopic(null);
+    setIntentResult(null);
+  }
+
+  async function createAreaRecommendation() {
+    if (!studyPurpose || (studyPurpose === "discuss" && !studyTopic) || intentSaving) return;
+    setIntentSaving(true);
+    try {
+      const response = await fetch("/api/study-intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookingDate: "2026-08-20",
+          timeSlot: time,
+          purpose: studyPurpose,
+          topic: studyPurpose === "discuss" ? studyTopic : null,
+        }),
+      });
+      const data = await response.json() as { intent?: StudyIntentResult; error?: string };
+      if (!response.ok || !data.intent) throw new Error(data.error || "暂时无法生成区域建议");
+      setIntentResult(data.intent);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "暂时无法生成区域建议");
+    } finally {
+      setIntentSaving(false);
+    }
+  }
+
+  function openRecommendedArea() {
+    if (!intentResult) return;
+    setFloor(intentResult.recommendation.floor);
+    showToast(`已定位到 ${intentResult.recommendation.floor} · ${intentResult.recommendation.zone}区`);
+    window.setTimeout(() => document.getElementById("seat-map-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+  }
+
+  function resetStudyMatch() {
+    setStudyPurpose(null);
+    setStudyTopic(null);
+    setIntentResult(null);
+  }
+
+  return (
+    <main className="page seats-page">
+      <div className="page-heading seat-page-hero">
+        <div className="seat-hero-copy">
+          <span><i />座位预约</span>
+          <h1>选择一处，安静坐下</h1>
+          <p>查看馆内实时座位，预约后请在 30 分钟内到馆签到。</p>
+        </div>
+        <div className="seat-hero-status">
+          <span>当前浏览</span>
+          <strong>{floor}</strong>
+          <p><b>{loadingSeats ? "—" : statusCounts.free}</b> 个座位可预约</p>
+        </div>
+      </div>
+
+      <div className="selection-toolbar">
+        <div><span>日期</span><strong>今天 · 8月20日</strong></div>
+        <div className="time-select"><span>使用时段</span><select value={time} onChange={(event) => setTime(event.target.value)} aria-label="选择使用时段"><option>14:30—18:00</option><option>18:00—21:30</option><option>08:30—12:00</option></select></div>
+        <div><span>偏好</span><strong>静音区 · 有电源</strong></div>
+      </div>
+
+      <section className={`study-match-card${intentResult ? " has-result" : ""}`} aria-labelledby="study-match-title">
+        <aside className="study-match-intro">
+          <span><i /> 场景匹配</span>
+          <h2 id="study-match-title">今天，想怎样学习？</h2>
+          <p>用一个选择，找到更合适的空间和同方向的人。</p>
+          <div className="match-orbit" aria-hidden="true"><i /><i /><i /><i /></div>
+          <small>匿名聚合 · 实时匹配</small>
+        </aside>
+        <div className="study-match-workspace" aria-live="polite">
+          {intentLoading ? (
+            <div className="match-workspace-loading"><i /><span>正在读取你的场景记录</span></div>
+          ) : intentResult ? (
+            <div className="match-complete">
+              <header>
+                <span className="match-check">✓</span>
+                <div><small>匹配完成</small><h3>{intentResult.recommendation.zoneName}</h3></div>
+                <button className="match-reset" onClick={resetStudyMatch}>重新选择</button>
+              </header>
+              <div className="match-recommendation">
+                <div className="match-recommendation-location"><small>推荐前往</small><strong>{intentResult.recommendation.floor}<i>·</i>{intentResult.recommendation.zone}区</strong></div>
+                <div className="match-recommendation-reason"><small>为什么是这里</small><p>{intentResult.recommendation.reason}</p><span><i />{intentResult.recommendation.peerCount > 1 ? `同一时段，还有 ${intentResult.recommendation.peerCount - 1} 位同学选择相同方向` : "你的选择已加入当前时段的需求聚合"}</span></div>
+              </div>
+              <footer><span>只呈现趋势，不展示个人身份</span><button onClick={openRecommendedArea}>在地图中定位 <i>→</i></button></footer>
+            </div>
+          ) : (
+            <div className="match-question">
+              <header><span>STEP <b>01</b></span><p>选择今天的主要学习方式</p></header>
+              <div className="purpose-options" role="group" aria-label="选择今天的学习方式">
+                {studyPurposes.map((purpose) => (
+                  <button key={purpose.value} className={studyPurpose === purpose.value ? "active" : ""} onClick={() => chooseStudyPurpose(purpose.value)}>
+                    <i>{purpose.index}</i><span><strong>{purpose.label}</strong><small>{purpose.note}</small></span><b>✓</b>
+                  </button>
+                ))}
+              </div>
+              {studyPurpose === "discuss" && (
+                <div className="topic-step">
+                  <div><span>STEP 02</span><strong>想讨论哪方面？</strong></div>
+                  <div className="topic-options" role="group" aria-label="选择讨论问题方向">
+                    {studyTopics.map((topic) => <button key={topic.value} className={studyTopic === topic.value ? "active" : ""} onClick={() => setStudyTopic(topic.value)}>{topic.label}</button>)}
+                  </div>
+                </div>
+              )}
+              <footer className="study-match-action"><span>仅展示聚合人数，不公开个人身份</span><button disabled={!studyPurpose || (studyPurpose === "discuss" && !studyTopic) || intentSaving} onClick={createAreaRecommendation}>{intentSaving ? "正在匹配…" : "查看区域建议"}<i>→</i></button></footer>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="floor-selector" aria-labelledby="floor-selector-title">
+        <div className="floor-selector-heading">
+          <div><span>馆舍楼层</span><strong id="floor-selector-title">选择学习区域</strong></div>
+          <small><i /> 座位状态实时同步</small>
+        </div>
+        <div className="floor-tabs" role="tablist" aria-label="选择楼层">
+          {floorInfo.map((item) => (
+            <button key={item.code} className={floor === item.code ? "active" : ""} onClick={() => setFloor(item.code)}>
+              <span>{item.floor}</span>
+              <strong>{floor === item.code && seats.length ? statusCounts.free : item.free}</strong>
+              <small>{item.note}</small>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <div className="seat-layout">
+        <section className="map-panel" id="seat-map-panel">
+          <div className="panel-heading">
+            <div><h2>{currentFloorName} · {floorInfo.find((item) => item.code === floor)?.note}</h2><p>浏览馆舍地图并直接选择空闲座位</p></div>
+            <div className="map-actions">
+              <button className="expand-map-button" onClick={() => { setExpandedZoom(1.15); setMapExpanded(true); }}><i>↗</i> 放大地图</button>
+            </div>
+          </div>
+          <div className="map-summary-bar">
+            <div className="seat-legend"><span><i className="free" />空闲</span><span><i className="busy" />使用中</span><span><i className="away" />暂离</span><span><i className="chosen" />已选择</span></div>
+            <div className="map-quick-counts">
+              <span><b>{statusCounts.free}</b> 空闲</span>
+              <span><b>{statusCounts.using}</b> 使用中</span>
+              <span><b>{statusCounts.away}</b> 暂离</span>
+            </div>
+            <small><i /> {loadingSeats ? "读取中" : "实时更新"}</small>
+          </div>
+          {loadingSeats ? <div className="map-loading">正在加载 {currentFloorName} 平面图…</div> : <div className="map-preview"><SeatMap seats={seats} selected={selected} setSelected={setSelected} zoom={1} recommendedZone={intentResult?.recommendation.floor === floor ? intentResult.recommendation.zone : null} /></div>}
+        </section>
+
+        <aside className="booking-panel">
+          <span className="booking-label">本次预约</span>
+          <div className="seat-number"><small>{floor}</small><strong>{selectedSeat?.label || "—"}</strong></div>
+          <dl>
+            <div><dt>区域</dt><dd>{currentFloorName} · {selectedSeat ? `${selectedSeat.zone}区` : "未选择"}</dd></div>
+            <div><dt>时段</dt><dd>{time}</dd></div>
+            <div><dt>设施</dt><dd>电源 · 台灯 · 静音</dd></div>
+          </dl>
+          <div className="booking-tip"><strong>签到提醒</strong><p>到馆后打开“我的”，扫描桌面二维码完成签到。</p></div>
+          <button className="confirm-button" disabled={!selectedSeat || saving} onClick={confirmReservation}>{saving ? "正在确认…" : reservation?.floor === floor && reservation.seatLabel === selectedSeat?.label ? "已预约此座位" : "确认预约"}</button>
+          {reservation && <button className="cancel-link" onClick={cancelReservation}>取消当前预约</button>}
+        </aside>
+      </div>
+
+      {mapExpanded && (
+        <div className="expanded-map-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setMapExpanded(false); }}>
+          <section className="expanded-map-dialog" role="dialog" aria-modal="true" aria-label={`${currentFloorName}座位地图`}>
+            <header className="expanded-map-header">
+              <div><span>{floor} / 馆舍地图</span><h2>{currentFloorName} · {floorInfo.find((item) => item.code === floor)?.note}</h2><p>放大后可横向、纵向滑动，空闲座位可直接选择</p></div>
+              <div className="expanded-map-tools">
+                <div className="map-controls" aria-label="全屏地图缩放">
+                  <button onClick={() => setExpandedZoom((value) => Math.max(.7, value - .1))}>−</button>
+                  <span>{Math.round(expandedZoom * 100)}%</span>
+                  <button onClick={() => setExpandedZoom((value) => Math.min(2, value + .1))}>＋</button>
+                </div>
+                <button className="reset-map-button" onClick={() => setExpandedZoom(1.15)}>重置</button>
+                <button className="close-map-button" onClick={() => setMapExpanded(false)} aria-label="关闭全屏地图">×</button>
+              </div>
+            </header>
+
+            <div className="expanded-map-meta">
+              <div className="seat-legend"><span><i className="free" />空闲</span><span><i className="busy" />使用中</span><span><i className="away" />暂离</span><span><i className="chosen" />已选择</span></div>
+              <div className="expanded-counts"><span><b>{statusCounts.free}</b> 空闲</span><span>{statusCounts.using} 使用中</span><span>{statusCounts.away} 暂离</span></div>
+              <strong>{selectedSeat ? `已选择 ${floor} · ${selectedSeat.label}` : "请点击一个空闲座位"}</strong>
+            </div>
+
+            <div className="expanded-map-viewport">
+              <SeatMap seats={seats} selected={selected} setSelected={setSelected} zoom={expandedZoom} recommendedZone={intentResult?.recommendation.floor === floor ? intentResult.recommendation.zone : null} />
+            </div>
+
+            <footer className="expanded-map-footer">
+              <span>使用触控板、鼠标滚动条或触屏滑动浏览完整地图</span>
+              <button disabled={!selectedSeat} onClick={() => setMapExpanded(false)}>{selectedSeat ? `选定 ${selectedSeat.label}，返回预约` : "请先选择座位"}</button>
+            </footer>
+          </section>
+        </div>
+      )}
+    </main>
+  );
+}
+
+function BooksView({
+  initialQuery,
+  borrowed,
+  onBorrow,
+  showToast,
+}: {
+  initialQuery: string;
+  borrowed: number[];
+  onBorrow: (bookId: number) => Promise<boolean>;
+  showToast: (message: string) => void;
+}) {
+  const [input, setInput] = useState(initialQuery);
+  const [query, setQuery] = useState(initialQuery);
+  const [hasSearched, setHasSearched] = useState(Boolean(initialQuery));
+  const [quizOpen, setQuizOpen] = useState(false);
+  const [quizStep, setQuizStep] = useState(0);
+  const [quizAnswers, setQuizAnswers] = useState<number[]>([]);
+
+  const exactResults = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    if (!keyword) return [];
+    return books.filter((book) => `${book.title}${book.author}${book.callNumber}${book.category}`.toLowerCase().includes(keyword));
+  }, [query]);
+
+  const anchorBook = exactResults[0] ?? null;
+  const similarBooks = useMemo(() => {
+    if (!anchorBook) return [];
+    return books.filter((book) => book.category === anchorBook.category && book.id !== anchorBook.id && !exactResults.some((result) => result.id === book.id)).slice(0, 3);
+  }, [anchorBook, exactResults]);
+  const relatedBooks = useMemo(() => {
+    if (!anchorBook) return [];
+    return (relatedBookIds[anchorBook.id] ?? [])
+      .map((id) => books.find((book) => book.id === id))
+      .filter((book): book is Book => Boolean(book) && !exactResults.some((result) => result.id === book.id) && !similarBooks.some((similar) => similar.id === book.id))
+      .slice(0, 3);
+  }, [anchorBook, exactResults, similarBooks]);
+
+  const quizResults = useMemo(() => {
+    const scores = new Map<number, number>();
+    quizAnswers.forEach((optionIndex, questionIndex) => {
+      const option = readingQuizQuestions[questionIndex]?.options[optionIndex];
+      option?.bookIds.forEach((bookId, rank) => scores.set(bookId, (scores.get(bookId) ?? 0) + option.bookIds.length - rank));
+    });
+    return [...books]
+      .sort((left, right) => (scores.get(right.id) ?? 0) - (scores.get(left.id) ?? 0) || left.id - right.id)
+      .slice(0, 3);
+  }, [quizAnswers]);
+
+  useEffect(() => {
+    if (!quizOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setQuizOpen(false);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [quizOpen]);
+
+  function openQuiz() {
+    setQuizAnswers([]);
+    setQuizStep(0);
+    setQuizOpen(true);
+  }
+
+  function answerQuiz(optionIndex: number) {
+    setQuizAnswers((current) => [...current.slice(0, quizStep), optionIndex]);
+    setQuizStep((current) => current + 1);
+  }
+
+  function showQuizBook(book: Book) {
+    search(book.title);
+    setQuizOpen(false);
+  }
+
+  function search(value: string) {
+    const nextQuery = value.trim();
+    if (!nextQuery) return;
+    setInput(nextQuery);
+    setQuery(nextQuery);
+    setHasSearched(true);
+  }
+
+  function submitSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    search(input);
+  }
+
+  function recommendationReason(book: Book, kind: "similar" | "related") {
+    if (!anchorBook) return "";
+    if (kind === "similar") {
+      const pairKey = [anchorBook.id, book.id].sort((left, right) => left - right).join("-");
+      return similarityReasons[pairKey] ?? `都从不同角度讨论${anchorBook.category}领域中的相近主题`;
+    }
+    const reasons: Record<string, string> = {
+      "文学-社科": "从故事中的个人经验，走向社会与历史背景",
+      "文学-设计": "从叙事与感受，延伸到视觉和审美表达",
+      "社科-文学": "用文学中的具体人生，补充社会观察",
+      "社科-设计": "把制度与群体问题，转化为人与系统的设计视角",
+      "社科-科技": "继续理解技术如何改变产业与社会结构",
+      "设计-科技": "把以人为本的原则，带入真实技术与产品环境",
+      "设计-社科": "从个体体验，进一步理解组织与社会系统",
+      "设计-文学": "用叙事和艺术经验拓宽感受与表达",
+      "科技-社科": "从技术竞争，延伸到产业、制度与社会影响",
+      "科技-设计": "从技术能力回到产品选择与人的体验",
+    };
+    return reasons[`${anchorBook.category}-${book.category}`] ?? `从${anchorBook.category}延伸到${book.category}，换一个视角理解同一问题`;
+  }
+
+  async function borrow(book: Book) {
+    if (book.available === 0) {
+      showToast(`已加入《${book.title}》预约队列`);
+      return;
+    }
+    if (borrowed.includes(book.id)) {
+      showToast(`《${book.title}》已在你的借阅清单中`);
+      return;
+    }
+    if (await onBorrow(book.id)) showToast(`《${book.title}》已加入借阅清单，请到 ${book.location} 取书`);
+  }
+
+  const quizFinished = quizStep >= readingQuizQuestions.length;
+  const currentQuizQuestion = readingQuizQuestions[quizStep] ?? null;
+
+  return (
+    <main className="page discovery-page">
+      <section className="discovery-heading">
+        <h1>你想借哪一本？</h1>
+        <p>先准确找到它，再沿着内容关联发现几本值得一起看的书。</p>
+
+        <form className="discovery-search" onSubmit={submitSearch}>
+          <span className="search-icon" aria-hidden="true" />
+          <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="输入书名、作者或索书号" aria-label="输入想借的书" autoFocus />
+          <button type="submit">搜索</button>
+        </form>
+
+        <div className="search-examples">
+          <span>可以试试</span>
+          {["百年孤独", "设计心理学", "置身事内", "芯片战争"].map((example) => <button key={example} onClick={() => search(example)}>《{example}》</button>)}
+        </div>
+
+        <button className="reading-quiz-entry" onClick={openQuiz}>
+          <span className="quiz-entry-mark">?</span>
+          <span><small>还没想好读什么？</small><strong>回答 3 个小问题，找到今天适合你的书</strong></span>
+          <i>开始选择 →</i>
+        </button>
+      </section>
+
+      {!hasSearched && (
+        <section className="discovery-empty">
+          <div className="shelf-line" aria-hidden="true"><i /><i /><i /><i /><i /></div>
+          <span>每一次寻找，都有新的相遇</span>
+          <h2>从想读的这一本，走向更辽阔的阅读</h2>
+          <p>让好书彼此照亮，也让灵感在下一次翻页时自然发生。</p>
+        </section>
+      )}
+
+      {hasSearched && exactResults.length === 0 && (
+        <section className="no-book-found">
+          <span>没有检索到“{query}”</span>
+          <h2>换一个更短的书名或作者试试</h2>
+          <p>当前演示馆藏支持上方四个示例，也可以搜索“文学”“社科”“设计”或“科技”。</p>
+        </section>
+      )}
+
+      {hasSearched && exactResults.length > 0 && anchorBook && (
+        <div className="discovery-results">
+          <section className="exact-section">
+            <div className="result-section-title"><div><span>01 / 搜索结果</span><h2>馆藏搜索结果</h2></div><small>共 {exactResults.length} 条馆藏结果</small></div>
+            <div className="exact-list">
+              {exactResults.map((book) => (
+                <article className="exact-book" key={book.id}>
+                  <BookCover book={book} />
+                  <div className="exact-book-copy">
+                    <span>{book.category} · 纸质馆藏</span>
+                    <h3>{book.title}</h3>
+                    <p>{book.author}</p>
+                    <small>{book.description}</small>
+                  </div>
+                  <div className="book-location">
+                    <dl><div><dt>索书号</dt><dd>{book.callNumber}</dd></div><div><dt>馆藏位置</dt><dd>{book.location}</dd></div></dl>
+                    <p className={book.available > 0 ? "available" : "unavailable"}><i />{book.available > 0 ? `在架可借 ${book.available} 本` : "暂无可借复本"}</p>
+                    <button onClick={() => borrow(book)}>{borrowed.includes(book.id) ? "已加入清单" : book.available > 0 ? "加入借阅清单" : "预约排队"}</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="recommend-section">
+            <div className="result-section-title"><div><span>02 / 主动发现</span><h2>从《{anchorBook.title}》继续读</h2></div><small>推荐依据对你透明可见</small></div>
+            <div className="reading-path" aria-label="围绕目标图书生成的知识路径">
+              <div className="reading-origin">
+                <span>阅读起点</span>
+                <strong>《{anchorBook.title}》</strong>
+                <small>{anchorBook.author}</small>
+              </div>
+              <div className="reading-route">
+                <div className="reading-route-heading"><div><span>沿着兴趣，继续探索</span><strong>三条阅读线索</strong></div><small>从主题、背景与表达方式展开</small></div>
+                <div className="thread-nodes">
+                  {(knowledgeThreads[anchorBook.id] ?? []).map((thread, index) => <span key={thread}><i>{String(index + 1).padStart(2, "0")}</i><b>{thread}</b></span>)}
+                </div>
+              </div>
+            </div>
+            <div className="recommend-columns">
+              <div className="recommend-group">
+                <div className="recommend-group-heading"><strong>相似读物</strong><span>共同主题 · 相近视角</span></div>
+                {similarBooks.map((book) => (
+                  <article className="recommend-book" key={book.id}>
+                    <BookCover book={book} small />
+                    <div><span>{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><small><b>相似点</b>{recommendationReason(book, "similar")}</small></div>
+                    <button onClick={() => borrow(book)} aria-label={`将《${book.title}》加入借阅清单`}>＋</button>
+                  </article>
+                ))}
+              </div>
+
+              <div className="recommend-group related-group">
+                <div className="recommend-group-heading"><strong>相关领域</strong><span>换个视角 · 建立连接</span></div>
+                {relatedBooks.map((book) => (
+                  <article className="recommend-book" key={book.id}>
+                    <BookCover book={book} small />
+                    <div><span>{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><small><b>推荐理由</b>{recommendationReason(book, "related")}</small></div>
+                    <button onClick={() => borrow(book)} aria-label={`将《${book.title}》加入借阅清单`}>＋</button>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {quizOpen && (
+        <div className="quiz-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setQuizOpen(false); }}>
+          <section className="quiz-dialog" role="dialog" aria-modal="true" aria-label="阅读偏好选择">
+            <header className="quiz-header">
+              <div><span>今日阅读选择</span><h2>{quizFinished ? "为你找到这三本书" : "用几个简单选择，找到想读的书"}</h2></div>
+              <button onClick={() => setQuizOpen(false)} aria-label="关闭阅读选择">×</button>
+            </header>
+
+            {!quizFinished && currentQuizQuestion && (
+              <div className="quiz-question-view">
+                <div className="quiz-progress">
+                  <span>{String(quizStep + 1).padStart(2, "0")}</span>
+                  <div>{readingQuizQuestions.map((question, index) => <i className={index <= quizStep ? "active" : ""} key={question.label} />)}</div>
+                  <small>{String(readingQuizQuestions.length).padStart(2, "0")}</small>
+                </div>
+                <div className="quiz-question-heading"><span>{currentQuizQuestion.label}</span><h3>{currentQuizQuestion.question}</h3><p>跟着第一感觉选择就好，没有标准答案。</p></div>
+                <div className="quiz-options">
+                  {currentQuizQuestion.options.map((option, optionIndex) => (
+                    <button key={option.title} onClick={() => answerQuiz(optionIndex)}>
+                      <i>{String.fromCharCode(65 + optionIndex)}</i>
+                      <span><strong>{option.title}</strong><small>{option.note}</small></span>
+                      <b>→</b>
+                    </button>
+                  ))}
+                </div>
+                <div className="quiz-question-footer"><button disabled={quizStep === 0} onClick={() => setQuizStep((current) => Math.max(0, current - 1))}>← 上一题</button><span>完成后会推荐 3 本馆藏图书</span></div>
+              </div>
+            )}
+
+            {quizFinished && (
+              <div className="quiz-result-view">
+                <div className="quiz-result-intro"><span>根据你的选择</span><p>从馆藏中挑出了三本更贴近你此刻阅读状态的书。</p></div>
+                <div className="quiz-result-list">
+                  {quizResults.map((book, index) => (
+                    <article className="quiz-result-book" key={book.id}>
+                      <span className="quiz-result-rank">0{index + 1}</span>
+                      <BookCover book={book} />
+                      <div><span>{book.category}</span><h3>{book.title}</h3><p>{book.author}</p><small>{quizRecommendationCopy[book.id]}</small><b>{book.available > 0 ? `在架可借 ${book.available} 本` : "当前需预约"}</b></div>
+                      <button onClick={() => showQuizBook(book)}>查看馆藏</button>
+                    </article>
+                  ))}
+                </div>
+                <footer className="quiz-result-footer"><button onClick={openQuiz}>重新选择</button><span>推荐结果仅作阅读参考</span></footer>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+    </main>
+  );
+}
+
+function MineView({
+  reservation,
+  onCancelReservation,
+  borrowed,
+  showToast,
+  user,
+}: {
+  reservation: ReservationRecord | null;
+  onCancelReservation: () => Promise<void>;
+  borrowed: number[];
+  showToast: (message: string) => void;
+  user: User;
+}) {
+  const currentBooks = [books[2], books[0], ...books.filter((book) => borrowed.includes(book.id) && ![1, 3].includes(book.id))];
+
+  return (
+    <main className="page mine-page">
+      <div className="profile-heading">
+        <div className="profile-avatar">{user.name.slice(0, 1)}</div>
+        <div><span>学生读者 · 已实名认证</span><h1>{user.name}</h1><p>学号 / 借阅证号 {user.studentId}</p></div>
+        <div className="account-status"><strong>信用良好</strong><span>可借 12 本 · 已借 {currentBooks.length} 本</span></div>
+      </div>
+
+      <div className="mine-grid">
+        <section className="mine-section reservation-section">
+          <div className="section-title"><div><span>座位</span><h2>当前预约</h2></div></div>
+          {reservation ? (
+            <article className="reservation-ticket">
+              <div className="ticket-seat"><small>{reservation.floor}</small><strong>{reservation.seatLabel}</strong></div>
+              <div><span>今天 · {reservation.timeSlot}</span><h3>{floorName(reservation.floor)} {reservation.seatLabel} · 静音自习区</h3><p>请在预约开始后 30 分钟内完成签到</p></div>
+              <button onClick={onCancelReservation}>取消预约</button>
+            </article>
+          ) : (
+            <div className="no-reservation"><strong>今天没有座位预约</strong><p>前往选座页面查看实时空位。</p></div>
+          )}
+        </section>
+
+        <section className="mine-section borrowing-section">
+          <div className="section-title"><div><span>图书</span><h2>在借图书</h2></div><button>借阅历史</button></div>
+          <div className="borrowed-list">
+            {currentBooks.map((book, index) => (
+              <article key={`${book.id}-${index}`}>
+                <BookCover book={book} small />
+                <div><h3>{book.title}</h3><p>{book.author}</p><span className={index === 0 ? "due-soon" : ""}>{index === 0 ? "8月27日到期 · 剩余7天" : `9月${4 + index}日到期`}</span></div>
+                <button onClick={() => showToast(`《${book.title}》已续借至 9月26日`)}>续借</button>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <aside className="mine-section library-card">
+          <span>入馆与借阅</span>
+          <h2>我的借阅码</h2>
+          <div className="barcode" aria-label="演示借阅条形码">
+            {[2,1,3,1,2,4,1,3,2,1,4,2,1,3,1,2,4,1,2,3,1,4].map((width, index) => <i style={{ width: `${width}px` }} key={index} />)}
+          </div>
+          <strong>{user.studentId.replace(/(.{4})/g, "$1 ").trim()}</strong>
+          <p>可用于闸机入馆、自助借书和座位签到</p>
+        </aside>
+      </div>
+    </main>
+  );
+}
+
+export default function Home() {
+  const [view, setView] = useState<View>("home");
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [reservation, setReservation] = useState<ReservationRecord | null>(null);
+  const [borrowed, setBorrowed] = useState<number[]>([]);
+  const [toast, setToast] = useState("");
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return (await response.json() as { user: User }).user;
+      })
+      .then((currentUser) => {
+        if (currentUser) {
+          setUser(currentUser);
+          return loadPersonalData();
+        }
+      })
+      .finally(() => setAuthLoading(false));
+  }, []);
+
+  async function loadPersonalData() {
+    const [reservationResponse, borrowResponse] = await Promise.all([
+      fetch("/api/reservations"),
+      fetch("/api/borrow-list"),
+    ]);
+    if (reservationResponse.ok) {
+      const data = await reservationResponse.json() as { reservation: ReservationRecord | null };
+      setReservation(data.reservation);
+    }
+    if (borrowResponse.ok) {
+      const data = await borrowResponse.json() as { bookIds: number[] };
+      setBorrowed(data.bookIds);
+    }
+  }
+
+  function showToast(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 3200);
+  }
+
+  async function onAuthenticated(nextUser: User) {
+    setUser(nextUser);
+    await loadPersonalData();
+  }
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    setUser(null);
+    setReservation(null);
+    setBorrowed([]);
+    setView("home");
+  }
+
+  async function addBorrowed(bookId: number) {
+    const response = await fetch("/api/borrow-list", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bookId }),
+    });
+    if (!response.ok) {
+      const data = await response.json() as { error?: string };
+      showToast(data.error || "保存借阅清单失败");
+      return false;
+    }
+    setBorrowed((current) => current.includes(bookId) ? current : [...current, bookId]);
+    return true;
+  }
+
+  async function cancelReservation() {
+    const response = await fetch("/api/reservations", { method: "DELETE" });
+    if (response.ok) {
+      setReservation(null);
+      showToast("座位预约已取消");
+    }
+  }
+
+  if (authLoading) {
+    return <div className="app-loading"><LibraryMark /><span>正在进入图书馆…</span></div>;
+  }
+
+  if (!user) return <AuthView onAuthenticated={onAuthenticated} />;
+
+  return (
+    <div className="site-shell">
+      <Header view={view} setView={setView} user={user} onLogout={logout} />
+      {view === "home" && <HomeView setView={setView} user={user} />}
+      {view === "seats" && <SeatsView reservation={reservation} onReservationChange={setReservation} showToast={showToast} />}
+      {view === "books" && <BooksView initialQuery="" borrowed={borrowed} onBorrow={addBorrowed} showToast={showToast} />}
+      {view === "mine" && <MineView reservation={reservation} onCancelReservation={cancelReservation} borrowed={borrowed} showToast={showToast} user={user} />}
+      <footer className="site-footer"><span>大连理工大学图书馆</span><p>馆藏服务 · 座位预约 · 借阅管理</p><button>使用帮助</button></footer>
+      {toast && <div className="toast" role="status"><i>✓</i>{toast}</div>}
+    </div>
+  );
+}

@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX `idx_reservations_active_seat_slot` ON `reservations` (`seat_id`,`booking_date`,`time_slot`) WHERE "reservations"."status" = 'active';--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_reservations_active_user_slot` ON `reservations` (`user_id`,`booking_date`,`time_slot`) WHERE "reservations"."status" = 'active';

@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1787232438148,
+      "tag": "0000_volatile_venom",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1787232465581,
+      "tag": "0001_milky_killmonger",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787251433653,
+      "tag": "0002_chemical_pyro",
+      "breakpoints": true
+    }
+  ]
+}
