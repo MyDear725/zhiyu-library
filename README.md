@@ -4,7 +4,7 @@
 
 知遇图书馆是面向高校图书馆的智能借阅与学习空间服务系统，围绕“借书”和“占座”两项核心需求重新设计图书馆体验。
 
-项目来自 **2026 黑客松 S2 · 赛题 02「图书馆的超进化」**。当前版本以大理理工大学总馆为演示场景，通过本地网页完整呈现用户注册、图书发现、场景化选座、座位预约和个人记录等流程。
+项目来自 **2026 黑客松 S2 · 赛题 02「图书馆的超进化」**。当前版本以大连理工大学总馆为演示场景，通过本地网页完整呈现用户注册、图书发现、场景化选座、座位预约和个人记录等流程。
 
 ## 项目背景
 
@@ -57,7 +57,7 @@
 
 - **补给站**：选购咖啡、面包、轻食和饮品，演示支付后由工作人员配送到当前预约座位。商品价格由服务端校验，订单与配送位置会持久化保存。
 - **同伴广场**：提供学习搭子、课程交流和竞赛组队三个公开频道，消息会定时同步；每次发言均可由用户决定实名或匿名发布，匿名消息不会向频道返回姓名和学号。
-- **馆内助手**：先从馆内知识库检索相关资料，再通过大模型生成简洁回答；未配置密钥或外部服务不可用时自动回退到本地检索回答。
+- **馆内助手**：先从馆内知识库检索相关资料，再通过大模型生成简洁回答；未配置密钥或外部服务不可用时自动回退到本地检索回答。启用大模型的方法请参见[配置 OpenAI API](#配置-openai-api可选)。
 
 ### 6. 用户、个人记录与离馆反馈
 
@@ -151,22 +151,68 @@ http://localhost:3000
 
 首次进入系统时，请使用 8 至 12 位数字学号注册账号。数据库表和演示座位数据会在本地运行时自动初始化。
 
-### 配置大模型问答（可选）
+### 配置 OpenAI API（可选）
 
-复制示例配置：
+馆内助手不依赖 API 也可以运行：没有配置密钥时，系统会使用本地知识库检索回答；完成以下配置后，系统会把检索到的馆内资料交给 OpenAI Responses API，由大模型组织成更自然的回答。
 
-```bash
+#### 1. 创建 API Key
+
+登录 [OpenAI API Key 管理页面](https://platform.openai.com/api-keys)，创建一个新的 Secret Key，并立即复制保存。密钥通常只会完整显示一次。
+
+> ChatGPT 会员与 OpenAI API 是不同的产品。使用 API 前，请确认对应 API 账户具有可用权限和额度。
+
+#### 2. 创建本地配置文件
+
+项目已经提供 `.dev.vars.example` 示例文件。请在 `libraryos-web` 项目目录中执行：
+
+Windows PowerShell：
+
+```powershell
+Copy-Item .dev.vars.example .dev.vars
+```
+
+Windows 命令提示符：
+
+```bat
 copy .dev.vars.example .dev.vars
 ```
 
-然后在 `.dev.vars` 中填写自己的 API Key：
+macOS / Linux：
+
+```bash
+cp .dev.vars.example .dev.vars
+```
+
+#### 3. 填写环境变量
+
+打开新生成的 `.dev.vars`，把占位内容替换为自己的密钥：
 
 ```text
-OPENAI_API_KEY=你的_API_Key
+OPENAI_API_KEY=sk-你的真实密钥
 OPENAI_MODEL=gpt-5.6-luna
 ```
 
-真实密钥不会被 Git 提交。未配置密钥时，馆内助手仍可使用本地知识库检索模式完成演示。
+- `OPENAI_API_KEY`：必填，用于服务端调用 OpenAI API。
+- `OPENAI_MODEL`：可选，不填写时系统默认使用 `gpt-5.6-luna`；如果当前 API 项目无法使用该模型，可以改为账户有权访问的模型 ID。
+
+#### 4. 重启并验证
+
+保存文件后，停止正在运行的开发服务并重新启动：
+
+```bash
+npm run dev
+```
+
+登录系统后依次进入“社区”→“馆内助手”并提出问题。回答下方出现“大模型生成”表示 API 已成功启用；如果显示“知识库检索”，说明系统正在使用本地回退模式，请检查密钥、模型权限、网络和 API 额度。
+
+#### 密钥安全
+
+- 不要把真实密钥写入 `.dev.vars.example`、README、前端代码或聊天消息。
+- 不要把 `.dev.vars` 提交到 GitHub。本项目已在 `.gitignore` 中忽略该文件。
+- 如果密钥意外公开，请立即前往 OpenAI 平台撤销并重新创建。
+- 部署到服务器时，应在托管平台的环境变量或 Secret 设置中配置密钥，不要上传本地 `.dev.vars`。
+
+更多信息可参考 [OpenAI Developer Quickstart](https://platform.openai.com/docs/quickstart/make-your-first-api-request) 和 [Responses API 文档](https://developers.openai.com/api/reference/cli/resources/responses/methods/create)。
 
 ### 常用命令
 
