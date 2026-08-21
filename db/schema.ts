@@ -103,3 +103,31 @@ export const studyIntents = sqliteTable(
     index("idx_study_intents_matching").on(table.bookingDate, table.timeSlot, table.purpose, table.topic),
   ],
 );
+
+export const communityOrders = sqliteTable(
+  "community_orders",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    itemsJson: text("items_json").notNull(),
+    totalCents: integer("total_cents").notNull(),
+    deliveryFloor: text("delivery_floor").notNull(),
+    deliverySeat: text("delivery_seat").notNull(),
+    status: text("status", { enum: ["paid", "preparing", "delivering", "delivered"] }).notNull().default("preparing"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("idx_community_orders_user_created").on(table.userId, table.createdAt)],
+);
+
+export const communityMessages = sqliteTable(
+  "community_messages",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }),
+    room: text("room", { enum: ["study", "course", "hackathon"] }).notNull(),
+    content: text("content").notNull(),
+    isAnonymous: integer("is_anonymous", { mode: "boolean" }).notNull().default(false),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("idx_community_messages_room_id").on(table.room, table.id)],
+);

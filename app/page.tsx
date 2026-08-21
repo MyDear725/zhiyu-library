@@ -1,8 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { communityProducts } from "../lib/community/catalog";
 
-type View = "home" | "seats" | "books" | "mine";
+type View = "home" | "seats" | "books" | "community" | "mine";
 type BookCategory = "全部" | "文学" | "社科" | "设计" | "科技";
 
 type User = { id: number; studentId: string; name: string };
@@ -38,6 +39,37 @@ type StudyIntentResult = {
     reason: string;
     peerCount: number;
   };
+};
+
+type CommunityTab = "market" | "chat" | "assistant";
+type CommunityRoom = "study" | "course" | "hackathon";
+type CommunityOrder = {
+  id: number;
+  items: Array<{ id: string; name: string; quantity: number; priceCents: number }>;
+  totalCents: number;
+  deliveryFloor: string;
+  deliverySeat: string;
+  status: "paid" | "preparing" | "delivering" | "delivered";
+  createdAt: string;
+};
+type CommunityMessage = {
+  id: number;
+  userId: number | null;
+  name: string;
+  studentId: string | null;
+  room: string;
+  content: string;
+  isAnonymous: boolean;
+  isMine: boolean;
+  isSystem: boolean;
+  createdAt: string;
+};
+type AssistantTurn = {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  sources?: Array<{ id: string; title: string }>;
+  mode?: "llm" | "retrieval";
 };
 
 type Book = {
@@ -412,6 +444,7 @@ function Header({ view, setView, user, onLogout }: { view: View; setView: (view:
     { id: "home", label: "首页" },
     { id: "books", label: "借书" },
     { id: "seats", label: "占座" },
+    { id: "community", label: "社区" },
     { id: "mine", label: "我的" },
   ];
 
@@ -491,7 +524,271 @@ function HomeView({
           </div>
           <span className="intent-arrow" aria-hidden="true">→</span>
         </button>
+
+        <button className="intent-card community-intent" onClick={() => setView("community")}>
+          <div className="intent-copy">
+            <span className="intent-index">03 · 社区</span>
+            <h2>连接与补给</h2>
+            <p>点一份馆内补给，寻找学习搭子，或向馆内助手提问。</p>
+          </div>
+          <span className="intent-arrow" aria-hidden="true">→</span>
+        </button>
       </section>
+    </main>
+  );
+}
+
+const communityRooms: Array<{ id: CommunityRoom; label: string; note: string; mark: string }> = [
+  { id: "study", label: "学习搭子", note: "分享目标与自习时段", mark: "伴" },
+  { id: "course", label: "课程交流", note: "交换资料与解题思路", mark: "课" },
+  { id: "hackathon", label: "竞赛组队", note: "寻找方向互补的队友", mark: "赛" },
+];
+
+const orderStatusText: Record<CommunityOrder["status"], string> = {
+  paid: "已支付",
+  preparing: "制作中",
+  delivering: "配送中",
+  delivered: "已送达",
+};
+
+function communityTime(value: string) {
+  const normalized = value.includes("T") ? value : `${value.replace(" ", "T")}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return "刚刚";
+  return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function CommunityView({
+  reservation,
+  showToast,
+  user,
+}: {
+  reservation: ReservationRecord | null;
+  showToast: (message: string) => void;
+  user: User;
+}) {
+  const [tab, setTab] = useState<CommunityTab>("market");
+  const [cart, setCart] = useState<Record<string, number>>({});
+  const [orders, setOrders] = useState<CommunityOrder[]>([]);
+  const [placingOrder, setPlacingOrder] = useState(false);
+  const [room, setRoom] = useState<CommunityRoom>("study");
+  const [messages, setMessages] = useState<CommunityMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [anonymousMessage, setAnonymousMessage] = useState(false);
+  const [assistantInput, setAssistantInput] = useState("");
+  const [assistantLoading, setAssistantLoading] = useState(false);
+  const [assistantTurns, setAssistantTurns] = useState<AssistantTurn[]>([
+    { id: 1, role: "assistant", content: "你好，我是馆内助手。可以问我如何选座、签到签退、借书、使用社区补给，或了解馆内规则。" },
+  ]);
+
+  const cartItems = useMemo(() => communityProducts
+    .filter((product) => (cart[product.id] ?? 0) > 0)
+    .map((product) => ({ ...product, quantity: cart[product.id] })), [cart]);
+  const cartTotal = cartItems.reduce((sum, item) => sum + item.priceCents * item.quantity, 0);
+
+  useEffect(() => {
+    fetch("/api/community/orders")
+      .then(async (response) => response.ok ? response.json() as Promise<{ orders: CommunityOrder[] }> : { orders: [] })
+      .then((data) => setOrders(data.orders));
+  }, []);
+
+  useEffect(() => {
+    if (tab !== "chat") return;
+    let active = true;
+    async function loadMessages(silent = false) {
+      if (!silent) setChatLoading(true);
+      try {
+        const response = await fetch(`/api/community/messages?room=${room}`);
+        if (!response.ok) return;
+        const data = await response.json() as { messages: CommunityMessage[] };
+        if (active) setMessages(data.messages);
+      } finally {
+        if (active && !silent) setChatLoading(false);
+      }
+    }
+    void loadMessages();
+    const timer = window.setInterval(() => void loadMessages(true), 6000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [tab, room]);
+
+  function changeQuantity(productId: string, change: number) {
+    setCart((current) => {
+      const next = Math.max(0, Math.min(5, (current[productId] ?? 0) + change));
+      const updated = { ...current };
+      if (next === 0) delete updated[productId];
+      else updated[productId] = next;
+      return updated;
+    });
+  }
+
+  async function placeOrder() {
+    if (!reservation || cartItems.length === 0 || placingOrder) return;
+    setPlacingOrder(true);
+    try {
+      const response = await fetch("/api/community/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: cartItems.map((item) => ({ id: item.id, quantity: item.quantity })) }),
+      });
+      const data = await response.json() as { order?: CommunityOrder; error?: string };
+      if (!response.ok || !data.order) throw new Error(data.error || "订单提交失败");
+      setOrders((current) => [data.order!, ...current].slice(0, 5));
+      setCart({});
+      showToast(`支付成功，补给将送往 ${data.order.deliveryFloor} ${data.order.deliverySeat}`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "订单提交失败");
+    } finally {
+      setPlacingOrder(false);
+    }
+  }
+
+  async function sendMessage(event: FormEvent) {
+    event.preventDefault();
+    const content = chatInput.trim();
+    if (!content || sendingMessage) return;
+    setSendingMessage(true);
+    try {
+      const response = await fetch("/api/community/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ room, content, anonymous: anonymousMessage }),
+      });
+      const data = await response.json() as { message?: CommunityMessage; error?: string };
+      if (!response.ok || !data.message) throw new Error(data.error || "消息发送失败");
+      setMessages((current) => [...current, data.message!]);
+      setChatInput("");
+      showToast(anonymousMessage ? "已匿名发布到同伴广场" : "消息已发布");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "消息发送失败");
+    } finally {
+      setSendingMessage(false);
+    }
+  }
+
+  async function askAssistant(event?: FormEvent, suggestedQuestion?: string) {
+    event?.preventDefault();
+    const question = (suggestedQuestion ?? assistantInput).trim();
+    if (!question || assistantLoading) return;
+    const userTurn: AssistantTurn = { id: Date.now(), role: "user", content: question };
+    setAssistantTurns((current) => [...current, userTurn]);
+    setAssistantInput("");
+    setAssistantLoading(true);
+    try {
+      const response = await fetch("/api/community/assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+      });
+      const data = await response.json() as { answer?: string; sources?: Array<{ id: string; title: string }>; mode?: "llm" | "retrieval"; error?: string };
+      if (!response.ok || !data.answer) throw new Error(data.error || "暂时无法回答");
+      setAssistantTurns((current) => [...current, { id: Date.now() + 1, role: "assistant", content: data.answer!, sources: data.sources, mode: data.mode }]);
+    } catch (error) {
+      setAssistantTurns((current) => [...current, { id: Date.now() + 1, role: "assistant", content: error instanceof Error ? error.message : "暂时无法回答，请稍后再试。" }]);
+    } finally {
+      setAssistantLoading(false);
+    }
+  }
+
+  return (
+    <main className="page community-page">
+      <section className="community-hero">
+        <div className="community-hero-copy"><span>LIBRARY COMMONS</span><h1>图书馆社区</h1><p>一份及时的补给，一次恰好的相遇，一处随时可问的馆内入口。</p></div>
+        <div className="community-hero-services" aria-label="社区服务概览">
+          <span><i>补</i><small>送至座位</small></span>
+          <span><i>伴</i><small>寻找同伴</small></span>
+          <span><i>知</i><small>馆内问答</small></span>
+        </div>
+      </section>
+
+      <nav className="community-tabs" aria-label="社区服务">
+        {([
+          { id: "market" as const, index: "01", label: "补给站", note: "送到座位" },
+          { id: "chat" as const, index: "02", label: "同伴广场", note: "公开交流" },
+          { id: "assistant" as const, index: "03", label: "馆内助手", note: "知识问答" },
+        ]).map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} aria-current={tab === item.id ? "page" : undefined} onClick={() => setTab(item.id)}><i>{item.index}</i><span><strong>{item.label}</strong><small>{item.note}</small></span></button>)}
+      </nav>
+
+      {tab === "market" && (
+        <section className="community-market">
+          <div className="market-catalog">
+            <header className="community-section-heading"><div><span>馆内补给</span><h2>安静学习，也要好好吃饭</h2></div><p>采用轻包装配送，请在馆内指定区域低声取餐。</p></header>
+            {orders[0] && <div className="active-order"><span><i />订单 #{orders[0].id}</span><strong>{orderStatusText[orders[0].status]}</strong><p>{orders[0].items.map((item) => `${item.name} × ${item.quantity}`).join("、")}</p><small>配送至 {orders[0].deliveryFloor} · {orders[0].deliverySeat}</small></div>}
+            <div className="product-grid">
+              {communityProducts.map((product) => {
+                const quantity = cart[product.id] ?? 0;
+                return <article className="community-product" key={product.id}>
+                  <div className={`product-mark product-${product.category}`}><span>{product.mark}</span><small>{product.category}</small></div>
+                  <div className="product-copy"><span>{product.category}</span><h3>{product.name}</h3><p>{product.description}</p><strong>¥{(product.priceCents / 100).toFixed(0)}</strong></div>
+                  {quantity ? <div className="quantity-control"><button onClick={() => changeQuantity(product.id, -1)}>−</button><span>{quantity}</span><button onClick={() => changeQuantity(product.id, 1)}>＋</button></div> : <button className="add-product" onClick={() => changeQuantity(product.id, 1)}>加入</button>}
+                </article>;
+              })}
+            </div>
+          </div>
+          <aside className="community-cart">
+            <header><span>本次补给</span><strong>{cartItems.reduce((sum, item) => sum + item.quantity, 0)} 件</strong></header>
+            <div className={`delivery-location${reservation ? " ready" : ""}`}><span>{reservation ? "配送位置" : "暂时无法配送"}</span><strong>{reservation ? `${reservation.floor} · ${reservation.seatLabel}` : "请先预约座位"}</strong><p>{reservation ? "工作人员将按当前预约送达" : "座位用于确认配送位置"}</p></div>
+            <div className="cart-lines">
+              {cartItems.length ? cartItems.map((item) => <div key={item.id}><span>{item.name}<small>× {item.quantity}</small></span><strong>¥{(item.priceCents * item.quantity / 100).toFixed(0)}</strong></div>) : <div className="empty-cart"><i>＋</i><span>从左侧选择咖啡或轻食</span></div>}
+            </div>
+            <div className="cart-total"><span>合计</span><strong>¥{(cartTotal / 100).toFixed(0)}</strong></div>
+            <button className="pay-order" disabled={!reservation || cartItems.length === 0 || placingOrder} onClick={placeOrder}>{placingOrder ? "正在支付…" : "确认支付并配送"}</button>
+            <small className="payment-note">演示支付 · 实际接入时由校园支付平台完成</small>
+          </aside>
+        </section>
+      )}
+
+      {tab === "chat" && (
+        <section className="community-chat">
+          <aside className="chat-rooms">
+            <header><span>PUBLIC ROOMS</span><h2>同伴广场</h2><p>找到正在做相似事情的人。</p></header>
+            {communityRooms.map((item) => <button key={item.id} className={room === item.id ? "active" : ""} onClick={() => setRoom(item.id)}><i>{item.mark}</i><span><strong>{item.label}</strong><small>{item.note}</small></span><b>→</b></button>)}
+            <div className="community-safety"><strong>公开交流提醒</strong><p>请勿发布手机号、密码等敏感信息，尊重每一位交流者。</p></div>
+          </aside>
+          <div className="chat-panel">
+            <header><div><span>#{room}</span><h2>{communityRooms.find((item) => item.id === room)?.label}</h2></div><small><i />正在同步 · 可选择匿名发布</small></header>
+            <div className="message-stream" aria-live="polite">
+              {chatLoading ? <div className="community-loading">正在进入频道…</div> : messages.map((message) => <article className={`${message.isMine ? "mine" : ""}${message.isSystem ? " system" : ""}${message.isAnonymous ? " anonymous" : ""}`.trim()} key={message.id}>
+                <div className="message-avatar">{message.isSystem ? "馆" : message.isAnonymous ? "匿" : message.name.slice(0, 1)}</div>
+                <div><header><strong>{message.name}{message.isAnonymous && <i>匿名</i>}</strong><span>{communityTime(message.createdAt)}</span></header><p>{message.content}</p></div>
+              </article>)}
+            </div>
+            <div className="chat-prompts"><span>快速发布：</span>{["找一位今晚自习搭子", "有人一起讨论项目吗？", "寻找竞赛前端队友"].map((prompt) => <button key={prompt} onClick={() => setChatInput(prompt)}>{prompt}</button>)}</div>
+            <form className="chat-composer" onSubmit={sendMessage}>
+              <label className="chat-input"><span className="sr-only">输入公开消息</span><textarea value={chatInput} onChange={(event) => setChatInput(event.target.value.slice(0, 300))} placeholder="分享你的学习目标、时间或想讨论的问题…" rows={2} /></label>
+              <div className="composer-footer">
+                <label className={`anonymous-switch${anonymousMessage ? " active" : ""}`}>
+                  <input type="checkbox" checked={anonymousMessage} onChange={(event) => setAnonymousMessage(event.target.checked)} />
+                  <span aria-hidden="true"><i /></span>
+                  <b><strong>匿名发布</strong><small>{anonymousMessage ? "其他同学不会看到你的姓名" : "以实名身份参与交流"}</small></b>
+                </label>
+                <div className="composer-submit"><small>{chatInput.length} / 300</small><button disabled={!chatInput.trim() || sendingMessage}>{sendingMessage ? "发送中…" : anonymousMessage ? "匿名发布" : "发送到频道"}</button></div>
+              </div>
+            </form>
+          </div>
+        </section>
+      )}
+
+      {tab === "assistant" && (
+        <section className="community-assistant">
+          <aside className="assistant-guide">
+            <span>RAG KNOWLEDGE</span><h2>馆内助手</h2><p>先检索馆内知识，再由大模型组织回答。</p>
+            <div className="rag-flow"><span><b>1</b>理解问题</span><i>→</i><span><b>2</b>检索知识</span><i>→</i><span><b>3</b>生成回答</span></div>
+            <div className="knowledge-scope"><strong>当前知识范围</strong>{["选座与签到", "馆藏与借阅", "社区与配送", "开放规则"].map((item) => <span key={item}><i />{item}</span>)}</div>
+            <small>回答仅用于馆内服务指引，重要事项请以服务台通知为准。</small>
+          </aside>
+          <div className="assistant-panel">
+            <header><div className="assistant-avatar">知</div><div><h2>知遇 · 馆内助手</h2><span><i />知识库已连接</span></div></header>
+            <div className="assistant-stream" aria-live="polite">
+              {assistantTurns.map((turn) => <article className={turn.role} key={turn.id}><div>{turn.role === "assistant" ? "知" : user.name.slice(0, 1)}</div><section><p>{turn.content}</p>{turn.sources && <footer><span>{turn.mode === "llm" ? "大模型生成" : "知识库检索"}</span>{turn.sources.map((source) => <i key={source.id}>{source.title}</i>)}</footer>}</section></article>)}
+              {assistantLoading && <article className="assistant"><div>知</div><section className="assistant-thinking"><i /><i /><i /></section></article>}
+            </div>
+            <div className="assistant-suggestions">{["预约后怎么签到？", "咖啡可以送到哪里？", "暂离状态是什么意思？"].map((question) => <button key={question} onClick={() => void askAssistant(undefined, question)}>{question}</button>)}</div>
+            <form className="assistant-composer" onSubmit={(event) => void askAssistant(event)}><input value={assistantInput} onChange={(event) => setAssistantInput(event.target.value.slice(0, 300))} placeholder="询问任何馆内服务问题" /><button disabled={!assistantInput.trim() || assistantLoading}>提问 <i>→</i></button></form>
+          </div>
+        </section>
+      )}
     </main>
   );
 }
@@ -1183,12 +1480,16 @@ function BooksView({
 function MineView({
   reservation,
   onCancelReservation,
+  onCheckoutReservation,
+  checkoutPending,
   borrowed,
   showToast,
   user,
 }: {
   reservation: ReservationRecord | null;
   onCancelReservation: () => Promise<void>;
+  onCheckoutReservation: () => Promise<void>;
+  checkoutPending: boolean;
   borrowed: number[];
   showToast: (message: string) => void;
   user: User;
@@ -1210,7 +1511,7 @@ function MineView({
             <article className="reservation-ticket">
               <div className="ticket-seat"><small>{reservation.floor}</small><strong>{reservation.seatLabel}</strong></div>
               <div><span>今天 · {reservation.timeSlot}</span><h3>{floorName(reservation.floor)} {reservation.seatLabel} · 静音自习区</h3><p>请在预约开始后 30 分钟内完成签到</p></div>
-              <button onClick={onCancelReservation}>取消预约</button>
+              <div className="reservation-actions"><button className="checkout-seat" disabled={checkoutPending} onClick={onCheckoutReservation}>{checkoutPending ? "正在签退…" : "离馆签退"}</button><button className="cancel-reservation" onClick={onCancelReservation}>取消预约</button></div>
             </article>
           ) : (
             <div className="no-reservation"><strong>今天没有座位预约</strong><p>前往选座页面查看实时空位。</p></div>
@@ -1244,6 +1545,29 @@ function MineView({
   );
 }
 
+function CheckoutCelebration({ seat, onClose }: { seat: string; onClose: () => void }) {
+  return (
+    <div className="checkout-celebration" role="status" aria-live="assertive">
+      <div className="confetti-field" aria-hidden="true">
+        {Array.from({ length: 24 }, (_, index) => <i key={index} style={{ "--index": index, "--left": `${3 + index * 4}%`, "--delay": `${index * -.09}s`, "--drift": `${(index % 7) * 18 - 54}px` } as CSSProperties} />)}
+      </div>
+      <section className="celebration-card">
+        <header className="celebration-heading">
+          <div className="celebration-mark"><i>✓</i><span /><span /></div>
+          <div><span>CHECK-OUT COMPLETE</span><h2>今天的专注，<br />值得被好好记住。</h2><p>本次学习已经完成，座位也已顺利释放。</p></div>
+        </header>
+        <div className="celebration-summary">
+          <section><span>今日记录</span><strong>完成一次专注学习</strong></section>
+          <i>+1</i>
+          <section><span>已释放座位</span><strong>{seat}</strong></section>
+        </div>
+        <div className="celebration-note"><i>“</i><p>每一次认真离席，都为下一次相遇留出了位置。</p></div>
+        <button onClick={onClose}>完成，返回图书馆</button>
+      </section>
+    </div>
+  );
+}
+
 export default function Home() {
   const [view, setView] = useState<View>("home");
   const [user, setUser] = useState<User | null>(null);
@@ -1251,6 +1575,8 @@ export default function Home() {
   const [reservation, setReservation] = useState<ReservationRecord | null>(null);
   const [borrowed, setBorrowed] = useState<number[]>([]);
   const [toast, setToast] = useState("");
+  const [checkoutPending, setCheckoutPending] = useState(false);
+  const [celebration, setCelebration] = useState<{ seat: string } | null>(null);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -1323,6 +1649,24 @@ export default function Home() {
     }
   }
 
+  async function checkoutReservation() {
+    if (!reservation || checkoutPending) return;
+    setCheckoutPending(true);
+    try {
+      const response = await fetch("/api/reservations/checkout", { method: "POST" });
+      const data = await response.json() as { floor?: string; seatLabel?: string; error?: string };
+      if (!response.ok) throw new Error(data.error || "签退失败");
+      const seat = `${data.floor ?? reservation.floor} · ${data.seatLabel ?? reservation.seatLabel}`;
+      setReservation(null);
+      setCelebration({ seat });
+      window.setTimeout(() => setCelebration(null), 6800);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "签退失败");
+    } finally {
+      setCheckoutPending(false);
+    }
+  }
+
   if (authLoading) {
     return <div className="app-loading"><LibraryMark /><span>正在进入图书馆…</span></div>;
   }
@@ -1335,9 +1679,11 @@ export default function Home() {
       {view === "home" && <HomeView setView={setView} user={user} />}
       {view === "seats" && <SeatsView reservation={reservation} onReservationChange={setReservation} showToast={showToast} />}
       {view === "books" && <BooksView initialQuery="" borrowed={borrowed} onBorrow={addBorrowed} showToast={showToast} />}
-      {view === "mine" && <MineView reservation={reservation} onCancelReservation={cancelReservation} borrowed={borrowed} showToast={showToast} user={user} />}
-      <footer className="site-footer"><span>大连理工大学图书馆</span><p>馆藏服务 · 座位预约 · 借阅管理</p><button>使用帮助</button></footer>
+      {view === "community" && <CommunityView reservation={reservation} showToast={showToast} user={user} />}
+      {view === "mine" && <MineView reservation={reservation} onCancelReservation={cancelReservation} onCheckoutReservation={checkoutReservation} checkoutPending={checkoutPending} borrowed={borrowed} showToast={showToast} user={user} />}
+      <footer className="site-footer"><span>大连理工大学图书馆</span><p>馆藏服务 · 座位预约 · 社区连接</p><button onClick={() => setView("community")}>使用帮助</button></footer>
       {toast && <div className="toast" role="status"><i>✓</i>{toast}</div>}
+      {celebration && <CheckoutCelebration seat={celebration.seat} onClose={() => setCelebration(null)} />}
     </div>
   );
 }

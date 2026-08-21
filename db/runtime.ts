@@ -80,6 +80,24 @@ async function bootstrap() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(user_id, booking_date, time_slot)
     )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS community_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      items_json TEXT NOT NULL,
+      total_cents INTEGER NOT NULL CHECK(total_cents >= 0),
+      delivery_floor TEXT NOT NULL,
+      delivery_seat TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'preparing' CHECK(status IN ('paid', 'preparing', 'delivering', 'delivered')),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS community_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      room TEXT NOT NULL CHECK(room IN ('study', 'course', 'hackathon')),
+      content TEXT NOT NULL,
+      is_anonymous INTEGER NOT NULL DEFAULT 0 CHECK(is_anonymous IN (0, 1)),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)"),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_seats_floor_status ON seats(floor, status)"),
@@ -89,7 +107,14 @@ async function bootstrap() {
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_reservations_active_user_slot ON reservations(user_id, booking_date, time_slot) WHERE status = 'active'"),
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_borrow_list_user_id ON borrow_list(user_id)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_study_intents_matching ON study_intents(booking_date, time_slot, purpose, topic)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS idx_community_orders_user_created ON community_orders(user_id, created_at)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS idx_community_messages_room_id ON community_messages(room, id)"),
   ]);
+
+  const messageColumns = await d1.prepare("PRAGMA table_info(community_messages)").all<{ name: string }>();
+  if (!messageColumns.results.some((column) => column.name === "is_anonymous")) {
+    await d1.prepare("ALTER TABLE community_messages ADD COLUMN is_anonymous INTEGER NOT NULL DEFAULT 0 CHECK(is_anonymous IN (0, 1))").run();
+  }
 
   const count = await d1.prepare("SELECT COUNT(*) AS count FROM seats").first<{ count: number }>();
   if (Number(count?.count ?? 0) === 0) {
@@ -115,6 +140,15 @@ async function bootstrap() {
     for (let index = 0; index < statements.length; index += 50) {
       await d1.batch(statements.slice(index, index + 50));
     }
+  }
+
+  const communityMessageCount = await d1.prepare("SELECT COUNT(*) AS count FROM community_messages").first<{ count: number }>();
+  if (Number(communityMessageCount?.count ?? 0) === 0) {
+    await d1.batch([
+      d1.prepare("INSERT INTO community_messages (user_id, room, content) VALUES (NULL, 'study', ?)").bind("欢迎来到学习搭子广场。可以说说你今天的学习目标和所在楼层。"),
+      d1.prepare("INSERT INTO community_messages (user_id, room, content) VALUES (NULL, 'course', ?)").bind("这里适合交流课程资料与解题思路，请避免直接发布作业答案。"),
+      d1.prepare("INSERT INTO community_messages (user_id, room, content) VALUES (NULL, 'hackathon', ?)").bind("正在寻找竞赛队友？介绍一下你的方向、技能和可协作时间吧。"),
+    ]);
   }
 
   await d1.prepare("DELETE FROM sessions WHERE expires_at <= CURRENT_TIMESTAMP").run();

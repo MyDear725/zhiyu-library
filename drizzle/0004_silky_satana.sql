@@ -1,0 +1,1 @@
+ALTER TABLE `community_messages` ADD `is_anonymous` integer DEFAULT false NOT NULL;
