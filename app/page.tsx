@@ -1,7 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState, type CSSProperties } from "react";
+import Image from "next/image";
+import { FormEvent, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { communityProducts } from "../lib/community/catalog";
+import { MotionStage } from "./motion-stage";
 
 type View = "home" | "seats" | "books" | "community" | "mine";
 type BookCategory = "全部" | "文学" | "社科" | "设计" | "科技";
@@ -366,11 +368,7 @@ function floorName(code: string) {
 
 function LibraryMark() {
   return (
-    <span className="library-mark" aria-hidden="true">
-      <i />
-      <i />
-      <i />
-    </span>
+    <span className="library-mark" aria-hidden="true"><Image src="/icons/books.svg" alt="" width={29} height={29} unoptimized /></span>
   );
 }
 
@@ -418,8 +416,7 @@ function AuthView({ onAuthenticated }: { onAuthenticated: (user: User) => void }
     <main className="auth-page">
       <section className="auth-intro">
         <div className="auth-brand"><LibraryMark /><span><strong>知遇图书馆</strong><small>大连理工大学 · 总馆</small></span></div>
-        <div className="auth-message"><span>欢迎回来</span><h1>一张座位，<br />一本好书。</h1><p>登录后可以浏览馆舍地图、在线选座，并保存自己的借阅清单。</p></div>
-        <div className="auth-hours"><span>今日开放</span><strong>08:00—22:00</strong><small>总馆当前有 312 个空闲座位</small></div>
+        <div className="auth-message"><span>欢迎回来</span><h1>让阅读与空间，<br />恰好遇见你。</h1><p>从一本书、一张座位，到一群同路的人，在这里开启今天的学习旅程。</p></div>
       </section>
 
       <section className="auth-form-wrap">
@@ -499,41 +496,55 @@ function HomeView({
   user: User;
 }) {
   return (
-    <main className="page choice-home">
-      <section className="choice-heading">
-        <span>下午好，{user.name}</span>
-        <h1>今天想做什么？</h1>
-        <p>选择一项服务</p>
-      </section>
+    <main className="page portal-home">
+      <header className="portal-intro">
+        <span>欢迎回来，{user.name}</span>
+        <h1>今天来图书馆，想先做什么？</h1>
+        <p>找一本书，或者选个座位开始学习。</p>
+      </header>
 
-      <section className="intent-grid" aria-label="选择图书馆服务">
-        <button className="intent-card borrow-intent" onClick={() => setView("books")}>
-          <div className="intent-copy">
-            <span className="intent-index">01 · 借书</span>
+      <section className="portal-primary-grid" aria-label="主要图书馆服务">
+        <button className="portal-card portal-choice portal-books" onClick={() => setView("books")}>
+          <div className="portal-card-copy">
+            <span>馆藏发现</span>
             <h2>借一本书</h2>
-            <p>搜索馆藏，同时发现相似书籍与相关领域。</p>
+            <p>搜索馆藏，找到你想读的书。</p>
           </div>
-          <span className="intent-arrow" aria-hidden="true">→</span>
+          <Image className="portal-illustration" src="/icons/books.svg" alt="" width={108} height={108} unoptimized aria-hidden="true" />
+          <span className="portal-card-footer">
+            <span className="portal-link">去借书 <Image src="/icons/arrow-right.svg" alt="" width={24} height={24} unoptimized /></span>
+          </span>
         </button>
 
-        <button className="intent-card seat-intent" onClick={() => setView("seats")}>
-          <div className="intent-copy">
-            <span className="intent-index">02 · 占座</span>
+        <button className="portal-card portal-choice portal-seats" onClick={() => setView("seats")}>
+          <div className="portal-card-copy">
+            <span>空间预约</span>
             <h2>选一个座位</h2>
-            <p>浏览楼层地图，查看座位状态并自由选择。</p>
+            <p>浏览楼层地图，选择合适的座位。</p>
           </div>
-          <span className="intent-arrow" aria-hidden="true">→</span>
-        </button>
-
-        <button className="intent-card community-intent" onClick={() => setView("community")}>
-          <div className="intent-copy">
-            <span className="intent-index">03 · 社区</span>
-            <h2>连接与补给</h2>
-            <p>点一份馆内补给，寻找学习搭子，或向馆内助手提问。</p>
-          </div>
-          <span className="intent-arrow" aria-hidden="true">→</span>
+          <Image className="portal-seat-icon" src="/icons/armchair.svg" alt="" width={92} height={92} unoptimized aria-hidden="true" />
+          <span className="portal-card-footer portal-seat-footer">
+            <span className="portal-primary-action">去占座 <Image src="/icons/arrow-right.svg" alt="" width={24} height={24} unoptimized /></span>
+            <span className="portal-seat-status">
+              <small>3F 静音区</small>
+              <strong>还有 <em>34</em> 个座位</strong>
+              <i><Image src="/icons/map-pin.svg" alt="" width={22} height={22} unoptimized /> 实时更新</i>
+            </span>
+          </span>
         </button>
       </section>
+
+      <button className="portal-community" onClick={() => setView("community")}>
+        <span className="portal-community-icon-wrap">
+          <Image className="portal-community-icon" src="/icons/chat-circle-dots.svg" alt="" width={48} height={48} unoptimized aria-hidden="true" />
+        </span>
+        <span className="portal-community-copy">
+          <small>馆内社区</small>
+          <strong>连接与补给</strong>
+          <span>补给配送、学习搭子和馆内问答，都在这里。</span>
+        </span>
+        <span className="portal-community-link">进入社区 <Image src="/icons/arrow-right.svg" alt="" width={24} height={24} unoptimized /></span>
+      </button>
     </main>
   );
 }
@@ -758,8 +769,8 @@ function CommunityView({
             <form className="chat-composer" onSubmit={sendMessage}>
               <label className="chat-input"><span className="sr-only">输入公开消息</span><textarea value={chatInput} onChange={(event) => setChatInput(event.target.value.slice(0, 300))} placeholder="分享你的学习目标、时间或想讨论的问题…" rows={2} /></label>
               <div className="composer-footer">
-                <label className={`anonymous-switch${anonymousMessage ? " active" : ""}`}>
-                  <input type="checkbox" checked={anonymousMessage} onChange={(event) => setAnonymousMessage(event.target.checked)} />
+                <label className={`anonymous-switch${anonymousMessage ? " active" : ""}`} htmlFor="anonymous-message">
+                  <input id="anonymous-message" aria-label="匿名发布" type="checkbox" checked={anonymousMessage} onChange={(event) => setAnonymousMessage(event.target.checked)} />
                   <span aria-hidden="true"><i /></span>
                   <b><strong>匿名发布</strong><small>{anonymousMessage ? "其他同学不会看到你的姓名" : "以实名身份参与交流"}</small></b>
                 </label>
@@ -910,10 +921,21 @@ function SeatsView({
   const selectedSeat = seats.find((seat) => seat.id === selected) ?? null;
   const currentFloorName = floorInfo.find((item) => item.code === floor)?.floor || "三层";
 
-  useEffect(() => {
-    let active = true;
+  function changeFloor(nextFloor: string) {
+    if (nextFloor === floor) return;
     setLoadingSeats(true);
     setSelected(null);
+    setFloor(nextFloor);
+  }
+
+  function changeTime(nextTime: string) {
+    if (nextTime === time) return;
+    setIntentLoading(true);
+    setTime(nextTime);
+  }
+
+  useEffect(() => {
+    let active = true;
     fetch(`/api/seats?floor=${floor}`)
       .then(async (response) => {
         const data = await response.json() as { seats?: SeatRecord[]; error?: string };
@@ -923,7 +945,7 @@ function SeatsView({
       .catch((error) => showToast(error instanceof Error ? error.message : "无法读取座位状态"))
       .finally(() => { if (active) setLoadingSeats(false); });
     return () => { active = false; };
-  }, [floor]);
+  }, [floor, showToast]);
 
   useEffect(() => {
     if (!mapExpanded) return;
@@ -941,7 +963,6 @@ function SeatsView({
 
   useEffect(() => {
     let active = true;
-    setIntentLoading(true);
     fetch(`/api/study-intent?bookingDate=2026-08-20&timeSlot=${encodeURIComponent(time)}`)
       .then(async (response) => {
         const data = await response.json() as { intent?: StudyIntentResult | null; error?: string };
@@ -954,7 +975,7 @@ function SeatsView({
       .catch((error) => { if (active) showToast(error instanceof Error ? error.message : "无法读取学习场景"); })
       .finally(() => { if (active) setIntentLoading(false); });
     return () => { active = false; };
-  }, [time]);
+  }, [time, showToast]);
 
   const statusCounts = useMemo(() => ({
     free: seats.filter((seat) => seat.status === "free").length,
@@ -1024,7 +1045,7 @@ function SeatsView({
 
   function openRecommendedArea() {
     if (!intentResult) return;
-    setFloor(intentResult.recommendation.floor);
+    changeFloor(intentResult.recommendation.floor);
     showToast(`已定位到 ${intentResult.recommendation.floor} · ${intentResult.recommendation.zone}区`);
     window.setTimeout(() => document.getElementById("seat-map-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
   }
@@ -1052,7 +1073,7 @@ function SeatsView({
 
       <div className="selection-toolbar">
         <div><span>日期</span><strong>今天 · 8月20日</strong></div>
-        <div className="time-select"><span>使用时段</span><select value={time} onChange={(event) => setTime(event.target.value)} aria-label="选择使用时段"><option>14:30—18:00</option><option>18:00—21:30</option><option>08:30—12:00</option></select></div>
+        <div className="time-select"><span>使用时段</span><select value={time} onChange={(event) => changeTime(event.target.value)} aria-label="选择使用时段"><option>14:30—18:00</option><option>18:00—21:30</option><option>08:30—12:00</option></select></div>
         <div><span>偏好</span><strong>静音区 · 有电源</strong></div>
       </div>
 
@@ -1111,7 +1132,7 @@ function SeatsView({
         </div>
         <div className="floor-tabs" role="tablist" aria-label="选择楼层">
           {floorInfo.map((item) => (
-            <button key={item.code} className={floor === item.code ? "active" : ""} onClick={() => setFloor(item.code)}>
+            <button key={item.code} className={floor === item.code ? "active" : ""} onClick={() => changeFloor(item.code)}>
               <span>{item.floor}</span>
               <strong>{floor === item.code && seats.length ? statusCounts.free : item.free}</strong>
               <small>{item.note}</small>
@@ -1326,7 +1347,7 @@ function BooksView({
 
         <form className="discovery-search" onSubmit={submitSearch}>
           <span className="search-icon" aria-hidden="true" />
-          <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="输入书名、作者或索书号" aria-label="输入想借的书" autoFocus />
+          <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="输入书名、作者或索书号" aria-label="输入想借的书" />
           <button type="submit">搜索</button>
         </form>
 
@@ -1608,10 +1629,10 @@ export default function Home() {
     }
   }
 
-  function showToast(message: string) {
+  const showToast = useCallback((message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 3200);
-  }
+  }, []);
 
   async function onAuthenticated(nextUser: User) {
     setUser(nextUser);
@@ -1676,11 +1697,13 @@ export default function Home() {
   return (
     <div className="site-shell">
       <Header view={view} setView={setView} user={user} onLogout={logout} />
-      {view === "home" && <HomeView setView={setView} user={user} />}
-      {view === "seats" && <SeatsView reservation={reservation} onReservationChange={setReservation} showToast={showToast} />}
-      {view === "books" && <BooksView initialQuery="" borrowed={borrowed} onBorrow={addBorrowed} showToast={showToast} />}
-      {view === "community" && <CommunityView reservation={reservation} showToast={showToast} user={user} />}
-      {view === "mine" && <MineView reservation={reservation} onCancelReservation={cancelReservation} onCheckoutReservation={checkoutReservation} checkoutPending={checkoutPending} borrowed={borrowed} showToast={showToast} user={user} />}
+      <MotionStage view={view}>
+        {view === "home" && <HomeView setView={setView} user={user} />}
+        {view === "seats" && <SeatsView reservation={reservation} onReservationChange={setReservation} showToast={showToast} />}
+        {view === "books" && <BooksView initialQuery="" borrowed={borrowed} onBorrow={addBorrowed} showToast={showToast} />}
+        {view === "community" && <CommunityView reservation={reservation} showToast={showToast} user={user} />}
+        {view === "mine" && <MineView reservation={reservation} onCancelReservation={cancelReservation} onCheckoutReservation={checkoutReservation} checkoutPending={checkoutPending} borrowed={borrowed} showToast={showToast} user={user} />}
+      </MotionStage>
       <footer className="site-footer"><span>大连理工大学图书馆</span><p>馆藏服务 · 座位预约 · 社区连接</p><button onClick={() => setView("community")}>使用帮助</button></footer>
       {toast && <div className="toast" role="status"><i>✓</i>{toast}</div>}
       {celebration && <CheckoutCelebration seat={celebration.seat} onClose={() => setCelebration(null)} />}
