@@ -1,5 +1,6 @@
 import { getD1 } from "../../../db";
 import { ensureDatabase } from "../../../db/runtime";
+import { isLibraryTimeSlot, isLibraryToday } from "../../../lib/library/time";
 import { getSessionUser } from "../../../lib/server/auth";
 
 type ReservationRow = {
@@ -32,14 +33,20 @@ export async function POST(request: Request) {
   const seatId = Number(payload.seatId);
   const bookingDate = payload.bookingDate ?? "";
   const timeSlot = payload.timeSlot ?? "";
-  if (!Number.isInteger(seatId) || !/^\d{4}-\d{2}-\d{2}$/.test(bookingDate) || timeSlot.length < 5) {
-    return Response.json({ error: "预约信息不完整" }, { status: 400 });
+  if (!Number.isInteger(seatId) || !isLibraryToday(bookingDate) || !isLibraryTimeSlot(timeSlot)) {
+    return Response.json({ error: "请选择今天的有效预约时段" }, { status: 400 });
   }
 
   const seat = await getD1().prepare("SELECT id, floor, label, zone, status FROM seats WHERE id = ?")
     .bind(seatId).first<{ id: number; floor: string; label: string; zone: string; status: string }>();
   if (!seat) return Response.json({ error: "座位不存在" }, { status: 404 });
   if (seat.status !== "free") return Response.json({ error: "该座位当前不可预约，请刷新地图" }, { status: 409 });
+
+  const conflict = await getD1().prepare(`SELECT id FROM reservations
+    WHERE seat_id = ? AND booking_date = ? AND time_slot = ?
+      AND status = 'active' AND user_id <> ? LIMIT 1`)
+    .bind(seatId, bookingDate, timeSlot, user.id).first<{ id: number }>();
+  if (conflict) return Response.json({ error: "该座位刚刚被预约，请选择其他座位" }, { status: 409 });
 
   try {
     await getD1().prepare(`UPDATE reservations SET status = 'cancelled'

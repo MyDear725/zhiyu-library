@@ -1,59 +1,105 @@
 import { getD1 } from "../../../db";
 import { ensureDatabase } from "../../../db/runtime";
+import { isLibraryTimeSlot, isLibraryToday, type LibraryTimeSlot } from "../../../lib/library/time";
 import { getSessionUser } from "../../../lib/server/auth";
-
-type StudyPurpose = "focus" | "discuss" | "read" | "other";
-type StudyTopic = "tech" | "design" | "competition" | "course" | "other";
+import {
+  recommendStudyZones,
+  type StudyPurpose,
+  type StudyTopic,
+  type ZoneAvailability,
+} from "../../../lib/study-match/engine";
 
 type IntentRow = {
   purpose: StudyPurpose;
   topic: StudyTopic | null;
-  recommendedFloor: string;
-  recommendedZone: string;
+};
+
+type ZoneAvailabilityRow = {
+  floor: string;
+  zone: string;
+  freeSeats: number;
+  totalSeats: number;
+};
+
+type PeerCountRow = {
+  floor: string;
+  zone: string;
+  count: number;
 };
 
 const purposeValues = new Set<StudyPurpose>(["focus", "discuss", "read", "other"]);
 const topicValues = new Set<StudyTopic>(["tech", "design", "competition", "course", "other"]);
 
-const recommendations: Record<string, { floor: string; zone: string; zoneName: string; reason: string }> = {
-  focus: { floor: "3F", zone: "C", zoneName: "静音区", reason: "交谈频率低、环境稳定，适合长时间专注。" },
-  read: { floor: "1F", zone: "A", zoneName: "临窗阅读区", reason: "靠近综合阅览区，自然采光更适合阅读与查找资料。" },
-  other: { floor: "2F", zone: "B", zoneName: "中央灵活区", reason: "空间使用更灵活，方便根据临时安排调整学习方式。" },
-  "discuss:tech": { floor: "4F", zone: "A", zoneName: "技术协作区", reason: "邻近电源与白板，当前技术讨论需求较集中。" },
-  "discuss:design": { floor: "2F", zone: "B", zoneName: "设计共创区", reason: "桌面空间充足，适合展示草图、原型和共同评审。" },
-  "discuss:competition": { floor: "4F", zone: "B", zoneName: "项目研讨区", reason: "适合多人快速交流，当前竞赛项目讨论较集中。" },
-  "discuss:course": { floor: "1F", zone: "B", zoneName: "课程讨论区", reason: "靠近综合资料区，方便边讨论边查阅课程资料。" },
-  "discuss:other": { floor: "4F", zone: "B", zoneName: "开放研讨区", reason: "对讨论主题限制较少，适合临时组队与问题交流。" },
-};
+async function loadZoneAvailability(bookingDate: string, timeSlot: LibraryTimeSlot) {
+  const result = await getD1().prepare(`SELECT seats.floor, seats.zone,
+    COUNT(*) AS totalSeats,
+    SUM(CASE WHEN seats.status = 'free' AND NOT EXISTS(
+      SELECT 1 FROM reservations
+      WHERE reservations.seat_id = seats.id
+        AND reservations.booking_date = ?
+        AND reservations.time_slot = ?
+        AND reservations.status = 'active'
+    ) THEN 1 ELSE 0 END) AS freeSeats
+    FROM seats
+    GROUP BY seats.floor, seats.zone
+    ORDER BY seats.floor, seats.zone`).bind(bookingDate, timeSlot).all<ZoneAvailabilityRow>();
 
-function recommendationFor(purpose: StudyPurpose, topic: StudyTopic | null) {
-  return recommendations[purpose === "discuss" ? `discuss:${topic ?? "other"}` : purpose];
+  return result.results.map((row: ZoneAvailabilityRow): ZoneAvailability => ({
+    floor: row.floor,
+    zone: row.zone,
+    freeSeats: Number(row.freeSeats),
+    totalSeats: Number(row.totalSeats),
+  }));
 }
 
-async function peerCount(bookingDate: string, timeSlot: string, purpose: StudyPurpose, topic: StudyTopic | null) {
-  const row = topic
-    ? await getD1().prepare(`SELECT COUNT(*) AS count FROM study_intents
-        WHERE booking_date = ? AND time_slot = ? AND purpose = ? AND topic = ?`)
-      .bind(bookingDate, timeSlot, purpose, topic).first<{ count: number }>()
-    : await getD1().prepare(`SELECT COUNT(*) AS count FROM study_intents
-        WHERE booking_date = ? AND time_slot = ? AND purpose = ? AND topic IS NULL`)
-      .bind(bookingDate, timeSlot, purpose).first<{ count: number }>();
-  return Number(row?.count ?? 0);
+async function loadLivePeerCounts(bookingDate: string, timeSlot: LibraryTimeSlot, excludedUserId: number) {
+  const result = await getD1().prepare(`SELECT recommended_floor AS floor,
+    recommended_zone AS zone, COUNT(*) AS count
+    FROM study_intents
+    WHERE booking_date = ? AND time_slot = ? AND user_id <> ?
+    GROUP BY recommended_floor, recommended_zone`)
+    .bind(bookingDate, timeSlot, excludedUserId).all<PeerCountRow>();
+
+  return Object.fromEntries(result.results.map((row: PeerCountRow) => [
+    `${row.floor}:${row.zone}`,
+    Number(row.count),
+  ]));
 }
 
-function responseIntent(row: IntentRow, count: number) {
-  const recommendation = recommendationFor(row.purpose, row.topic);
+async function responseIntent(input: {
+  userId: number;
+  bookingDate: string;
+  timeSlot: LibraryTimeSlot;
+  purpose: StudyPurpose;
+  topic: StudyTopic | null;
+}) {
+  const [availability, livePeerCounts] = await Promise.all([
+    loadZoneAvailability(input.bookingDate, input.timeSlot),
+    loadLivePeerCounts(input.bookingDate, input.timeSlot, input.userId),
+  ]);
+  const candidates = recommendStudyZones({
+    purpose: input.purpose,
+    topic: input.topic,
+    timeSlot: input.timeSlot,
+    availability,
+    livePeerCounts,
+  });
+  if (!candidates.length) return null;
+
   return {
-    purpose: row.purpose,
-    topic: row.topic,
-    recommendation: {
-      floor: row.recommendedFloor,
-      zone: row.recommendedZone,
-      zoneName: recommendation.zoneName,
-      reason: recommendation.reason,
-      peerCount: count,
-    },
+    purpose: input.purpose,
+    topic: input.topic,
+    recommendation: candidates[0],
+    alternatives: candidates.slice(1, 3),
+    generatedAt: new Date().toISOString(),
   };
+}
+
+function noAvailableZoneResponse() {
+  return Response.json({
+    code: "NO_AVAILABLE_ZONE",
+    error: "当前时段暂无可推荐区域，请切换时段后重试",
+  }, { status: 409 });
 }
 
 export async function GET(request: Request) {
@@ -63,15 +109,16 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const bookingDate = url.searchParams.get("bookingDate") ?? "";
   const timeSlot = url.searchParams.get("timeSlot") ?? "";
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(bookingDate) || timeSlot.length < 5) {
-    return Response.json({ error: "学习时段无效" }, { status: 400 });
+  if (!isLibraryToday(bookingDate) || !isLibraryTimeSlot(timeSlot)) {
+    return Response.json({ error: "请选择今天的有效学习时段" }, { status: 400 });
   }
-  const row = await getD1().prepare(`SELECT purpose, topic,
-    recommended_floor AS recommendedFloor, recommended_zone AS recommendedZone
+  const row = await getD1().prepare(`SELECT purpose, topic
     FROM study_intents WHERE user_id = ? AND booking_date = ? AND time_slot = ? LIMIT 1`)
     .bind(user.id, bookingDate, timeSlot).first<IntentRow>();
   if (!row) return Response.json({ intent: null });
-  return Response.json({ intent: responseIntent(row, await peerCount(bookingDate, timeSlot, row.purpose, row.topic)) });
+  const intent = await responseIntent({ userId: user.id, bookingDate, timeSlot, ...row });
+  if (!intent) return noAvailableZoneResponse();
+  return Response.json({ intent });
 }
 
 export async function POST(request: Request) {
@@ -88,14 +135,16 @@ export async function POST(request: Request) {
   const timeSlot = payload.timeSlot ?? "";
   const purpose = payload.purpose;
   const topic = payload.topic ?? null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(bookingDate) || timeSlot.length < 5 || !purpose || !purposeValues.has(purpose)) {
-    return Response.json({ error: "请选择今天的学习方式" }, { status: 400 });
+  if (!isLibraryToday(bookingDate) || !isLibraryTimeSlot(timeSlot) || !purpose || !purposeValues.has(purpose)) {
+    return Response.json({ error: "请选择今天的有效学习方式和时段" }, { status: 400 });
   }
   if (purpose === "discuss" && (!topic || !topicValues.has(topic))) {
     return Response.json({ error: "请选择要讨论的问题方向" }, { status: 400 });
   }
   const storedTopic = purpose === "discuss" ? topic : null;
-  const recommendation = recommendationFor(purpose, storedTopic);
+  const intent = await responseIntent({ userId: user.id, bookingDate, timeSlot, purpose, topic: storedTopic });
+  if (!intent) return noAvailableZoneResponse();
+
   await getD1().prepare(`INSERT INTO study_intents
     (user_id, booking_date, time_slot, purpose, topic, recommended_floor, recommended_zone, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -105,13 +154,15 @@ export async function POST(request: Request) {
       recommended_floor = excluded.recommended_floor,
       recommended_zone = excluded.recommended_zone,
       updated_at = CURRENT_TIMESTAMP`)
-    .bind(user.id, bookingDate, timeSlot, purpose, storedTopic, recommendation.floor, recommendation.zone)
+    .bind(
+      user.id,
+      bookingDate,
+      timeSlot,
+      purpose,
+      storedTopic,
+      intent.recommendation.floor,
+      intent.recommendation.zone,
+    )
     .run();
-  const row: IntentRow = {
-    purpose,
-    topic: storedTopic,
-    recommendedFloor: recommendation.floor,
-    recommendedZone: recommendation.zone,
-  };
-  return Response.json({ intent: responseIntent(row, await peerCount(bookingDate, timeSlot, purpose, storedTopic)) });
+  return Response.json({ intent });
 }
