@@ -399,6 +399,12 @@ textarea:focus-visible { outline: 3px solid rgba(36, 107, 159, .22); outline-off
 .match-orbit { display: none; }
 .study-match-intro h2 { font-family: var(--display-font); font-size: 33px; }
 .study-match-intro p { font-size: 14px; }
+.match-score { border-color: var(--stroke); background: var(--blue-50); }
+.match-factors > span,
+.match-alternatives button { border-color: var(--stroke); }
+.match-alternatives button { box-shadow: 0 7px 18px rgba(18, 55, 85, .04); }
+.match-demo-baseline { letter-spacing: .02em; }
+.seat-refresh-time { color: var(--text-soft) !important; }
 .purpose-options > button,
 .topic-options button { min-height: 82px; border-radius: 15px; background: #f7f9fb; }
 .purpose-options strong,

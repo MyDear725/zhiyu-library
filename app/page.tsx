@@ -3,13 +3,22 @@
 import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { communityProducts } from "../lib/community/catalog";
+import {
+  LIBRARY_TIME_SLOTS,
+  LIBRARY_TIME_ZONE,
+  isLibraryTimeSlot,
+  libraryDate,
+  libraryDateLabel,
+  type LibraryTimeSlot,
+} from "../lib/library/time";
+import type { Candidate as StudyCandidate } from "../lib/study-match/engine";
 import { MotionStage } from "./motion-stage";
 
 type View = "home" | "seats" | "books" | "community" | "mine";
 type BookCategory = "全部" | "文学" | "社科" | "设计" | "科技";
 
 type User = { id: number; studentId: string; name: string };
-type SeatStatus = "free" | "using" | "away";
+type SeatStatus = "free" | "using" | "away" | "reserved";
 type SeatRecord = {
   id: number;
   floor: string;
@@ -34,13 +43,9 @@ type StudyTopic = "tech" | "design" | "competition" | "course" | "other";
 type StudyIntentResult = {
   purpose: StudyPurpose;
   topic: StudyTopic | null;
-  recommendation: {
-    floor: string;
-    zone: string;
-    zoneName: string;
-    reason: string;
-    peerCount: number;
-  };
+  recommendation: StudyCandidate;
+  alternatives: StudyCandidate[];
+  generatedAt: string;
 };
 
 type CommunityTab = "market" | "chat" | "assistant";
@@ -818,7 +823,7 @@ function SeatMap({
   recommendedZone?: string | null;
 }) {
   function seatStatusText(status: SeatStatus) {
-    return status === "using" ? "使用中" : status === "away" ? "暂离" : "空闲";
+    return status === "using" ? "使用中" : status === "away" ? "暂离" : status === "reserved" ? "已预约" : "空闲";
   }
 
   return (
@@ -908,7 +913,8 @@ function SeatsView({
   const [floor, setFloor] = useState("3F");
   const [seats, setSeats] = useState<SeatRecord[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
-  const [time, setTime] = useState("14:30—18:00");
+  const [time, setTime] = useState<LibraryTimeSlot>("14:30—18:00");
+  const [bookingDate, setBookingDate] = useState(() => libraryDate());
   const [expandedZoom, setExpandedZoom] = useState(1.15);
   const [mapExpanded, setMapExpanded] = useState(false);
   const [loadingSeats, setLoadingSeats] = useState(true);
@@ -918,8 +924,19 @@ function SeatsView({
   const [intentResult, setIntentResult] = useState<StudyIntentResult | null>(null);
   const [intentLoading, setIntentLoading] = useState(true);
   const [intentSaving, setIntentSaving] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
+  const [highlightedArea, setHighlightedArea] = useState<{ floor: string; zone: string } | null>(null);
   const selectedSeat = seats.find((seat) => seat.id === selected) ?? null;
   const currentFloorName = floorInfo.find((item) => item.code === floor)?.floor || "三层";
+  const dateLabel = libraryDateLabel();
+  const lastUpdatedLabel = lastUpdatedAt ? new Intl.DateTimeFormat("zh-CN", {
+    timeZone: LIBRARY_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(new Date(lastUpdatedAt)) : null;
+  const recommendedZone = highlightedArea?.floor === floor ? highlightedArea.zone : null;
 
   function changeFloor(nextFloor: string) {
     if (nextFloor === floor) return;
@@ -929,23 +946,81 @@ function SeatsView({
   }
 
   function changeTime(nextTime: string) {
-    if (nextTime === time) return;
+    if (!isLibraryTimeSlot(nextTime) || nextTime === time) return;
+    setSelected(null);
     setIntentLoading(true);
     setTime(nextTime);
   }
 
+  const refreshSeats = useCallback(async ({ signal, quiet = false }: { signal?: AbortSignal; quiet?: boolean } = {}) => {
+    const currentBookingDate = libraryDate();
+    if (currentBookingDate !== bookingDate) {
+      setBookingDate(currentBookingDate);
+      return;
+    }
+    if (!quiet) setLoadingSeats(true);
+    try {
+      const query = new URLSearchParams({ floor, bookingDate, timeSlot: time });
+      const response = await fetch(`/api/seats?${query.toString()}`, { signal });
+      const data = await response.json() as { seats?: SeatRecord[]; generatedAt?: string; error?: string };
+      if (!response.ok) throw new Error(data.error || "无法读取座位状态");
+      setSeats(data.seats ?? []);
+      setLastUpdatedAt(data.generatedAt ?? new Date().toISOString());
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
+      showToast(quiet ? "实时刷新暂时失败，已保留上次座位状态" : error instanceof Error ? error.message : "无法读取座位状态");
+    } finally {
+      if (!quiet) setLoadingSeats(false);
+    }
+  }, [bookingDate, floor, showToast, time]);
+
+  const refreshIntent = useCallback(async ({ signal, quiet = false }: { signal?: AbortSignal; quiet?: boolean } = {}) => {
+    const currentBookingDate = libraryDate();
+    if (currentBookingDate !== bookingDate) {
+      setBookingDate(currentBookingDate);
+      return;
+    }
+    if (!quiet) setIntentLoading(true);
+    try {
+      const query = new URLSearchParams({ bookingDate, timeSlot: time });
+      const response = await fetch(`/api/study-intent?${query.toString()}`, { signal });
+      const data = await response.json() as { intent?: StudyIntentResult | null; error?: string };
+      if (!response.ok) throw new Error(data.error || "无法读取学习场景");
+      const intent = data.intent ?? null;
+      setIntentResult(intent);
+      setStudyPurpose(intent?.purpose ?? null);
+      setStudyTopic(intent?.topic ?? null);
+      setHighlightedArea((current) => {
+        if (!intent) return null;
+        const candidates = [intent.recommendation, ...intent.alternatives];
+        return current && candidates.some((candidate) => candidate.floor === current.floor && candidate.zone === current.zone)
+          ? current
+          : { floor: intent.recommendation.floor, zone: intent.recommendation.zone };
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
+      showToast(quiet ? "实时刷新暂时失败，已保留上次推荐" : error instanceof Error ? error.message : "无法读取学习场景");
+    } finally {
+      if (!quiet) setIntentLoading(false);
+    }
+  }, [bookingDate, showToast, time]);
+
+  const refreshCurrentView = useCallback(async () => {
+    const controller = new AbortController();
+    await Promise.all([
+      refreshSeats({ signal: controller.signal, quiet: true }),
+      refreshIntent({ signal: controller.signal, quiet: true }),
+    ]);
+  }, [refreshIntent, refreshSeats]);
+
   useEffect(() => {
-    let active = true;
-    fetch(`/api/seats?floor=${floor}`)
-      .then(async (response) => {
-        const data = await response.json() as { seats?: SeatRecord[]; error?: string };
-        if (!response.ok) throw new Error(data.error || "无法读取座位状态");
-        if (active) setSeats(data.seats ?? []);
-      })
-      .catch((error) => showToast(error instanceof Error ? error.message : "无法读取座位状态"))
-      .finally(() => { if (active) setLoadingSeats(false); });
-    return () => { active = false; };
-  }, [floor, showToast]);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => void refreshSeats({ signal: controller.signal }), 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [refreshSeats]);
 
   useEffect(() => {
     if (!mapExpanded) return;
@@ -962,25 +1037,36 @@ function SeatsView({
   }, [mapExpanded]);
 
   useEffect(() => {
-    let active = true;
-    fetch(`/api/study-intent?bookingDate=2026-08-20&timeSlot=${encodeURIComponent(time)}`)
-      .then(async (response) => {
-        const data = await response.json() as { intent?: StudyIntentResult | null; error?: string };
-        if (!response.ok) throw new Error(data.error || "无法读取学习场景");
-        if (!active) return;
-        setIntentResult(data.intent ?? null);
-        setStudyPurpose(data.intent?.purpose ?? null);
-        setStudyTopic(data.intent?.topic ?? null);
-      })
-      .catch((error) => { if (active) showToast(error instanceof Error ? error.message : "无法读取学习场景"); })
-      .finally(() => { if (active) setIntentLoading(false); });
-    return () => { active = false; };
-  }, [time, showToast]);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => void refreshIntent({ signal: controller.signal }), 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [refreshIntent]);
+
+  useEffect(() => {
+    let controller: AbortController | null = null;
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      controller?.abort();
+      controller = new AbortController();
+      void Promise.all([
+        refreshSeats({ signal: controller.signal, quiet: true }),
+        refreshIntent({ signal: controller.signal, quiet: true }),
+      ]);
+    }, 15_000);
+    return () => {
+      window.clearInterval(interval);
+      controller?.abort();
+    };
+  }, [refreshIntent, refreshSeats]);
 
   const statusCounts = useMemo(() => ({
     free: seats.filter((seat) => seat.status === "free").length,
     using: seats.filter((seat) => seat.status === "using").length,
     away: seats.filter((seat) => seat.status === "away").length,
+    reserved: seats.filter((seat) => seat.status === "reserved").length,
   }), [seats]);
 
   async function confirmReservation() {
@@ -990,16 +1076,17 @@ function SeatsView({
       const response = await fetch("/api/reservations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ seatId: selectedSeat.id, bookingDate: "2026-08-20", timeSlot: time }),
+        body: JSON.stringify({ seatId: selectedSeat.id, bookingDate, timeSlot: time }),
       });
       const data = await response.json() as { reservation?: ReservationRecord; error?: string };
       if (!response.ok || !data.reservation) throw new Error(data.error || "预约失败");
       onReservationChange(data.reservation);
+      setSelected(null);
+      await refreshCurrentView();
       showToast(`已预约 ${floorName(data.reservation.floor)} ${data.reservation.seatLabel}，使用时间 ${time}`);
     } catch (error) {
       showToast(error instanceof Error ? error.message : "预约失败");
-      const refreshed = await fetch(`/api/seats?floor=${floor}`);
-      if (refreshed.ok) setSeats(((await refreshed.json()) as { seats: SeatRecord[] }).seats);
+      await refreshSeats({ quiet: true });
     } finally {
       setSaving(false);
     }
@@ -1009,6 +1096,7 @@ function SeatsView({
     const response = await fetch("/api/reservations", { method: "DELETE" });
     if (response.ok) {
       onReservationChange(null);
+      await refreshCurrentView();
       showToast("当前座位预约已取消");
     }
   }
@@ -1017,6 +1105,7 @@ function SeatsView({
     setStudyPurpose(purpose);
     if (purpose !== "discuss") setStudyTopic(null);
     setIntentResult(null);
+    setHighlightedArea(null);
   }
 
   async function createAreaRecommendation() {
@@ -1027,7 +1116,7 @@ function SeatsView({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          bookingDate: "2026-08-20",
+          bookingDate,
           timeSlot: time,
           purpose: studyPurpose,
           topic: studyPurpose === "discuss" ? studyTopic : null,
@@ -1036,6 +1125,10 @@ function SeatsView({
       const data = await response.json() as { intent?: StudyIntentResult; error?: string };
       if (!response.ok || !data.intent) throw new Error(data.error || "暂时无法生成区域建议");
       setIntentResult(data.intent);
+      setHighlightedArea({
+        floor: data.intent.recommendation.floor,
+        zone: data.intent.recommendation.zone,
+      });
     } catch (error) {
       showToast(error instanceof Error ? error.message : "暂时无法生成区域建议");
     } finally {
@@ -1043,10 +1136,10 @@ function SeatsView({
     }
   }
 
-  function openRecommendedArea() {
-    if (!intentResult) return;
-    changeFloor(intentResult.recommendation.floor);
-    showToast(`已定位到 ${intentResult.recommendation.floor} · ${intentResult.recommendation.zone}区`);
+  function openRecommendedArea(candidate: StudyCandidate) {
+    setHighlightedArea({ floor: candidate.floor, zone: candidate.zone });
+    changeFloor(candidate.floor);
+    showToast(`已定位到 ${candidate.floor} · ${candidate.zone}区`);
     window.setTimeout(() => document.getElementById("seat-map-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
   }
 
@@ -1054,6 +1147,7 @@ function SeatsView({
     setStudyPurpose(null);
     setStudyTopic(null);
     setIntentResult(null);
+    setHighlightedArea(null);
   }
 
   return (
@@ -1072,8 +1166,8 @@ function SeatsView({
       </div>
 
       <div className="selection-toolbar">
-        <div><span>日期</span><strong>今天 · 8月20日</strong></div>
-        <div className="time-select"><span>使用时段</span><select value={time} onChange={(event) => changeTime(event.target.value)} aria-label="选择使用时段"><option>14:30—18:00</option><option>18:00—21:30</option><option>08:30—12:00</option></select></div>
+        <div><span>日期</span><strong>{dateLabel}</strong></div>
+        <div className="time-select"><span>使用时段</span><select value={time} onChange={(event) => changeTime(event.target.value)} aria-label="选择使用时段">{LIBRARY_TIME_SLOTS.map((slot) => <option key={slot}>{slot}</option>)}</select></div>
         <div><span>偏好</span><strong>静音区 · 有电源</strong></div>
       </div>
 
@@ -1093,13 +1187,37 @@ function SeatsView({
               <header>
                 <span className="match-check">✓</span>
                 <div><small>匹配完成</small><h3>{intentResult.recommendation.zoneName}</h3></div>
+                <span className="match-score"><b>{intentResult.recommendation.score.toFixed(1)}</b><small>综合分</small></span>
                 <button className="match-reset" onClick={resetStudyMatch}>重新选择</button>
               </header>
               <div className="match-recommendation">
                 <div className="match-recommendation-location"><small>推荐前往</small><strong>{intentResult.recommendation.floor}<i>·</i>{intentResult.recommendation.zone}区</strong></div>
-                <div className="match-recommendation-reason"><small>为什么是这里</small><p>{intentResult.recommendation.reason}</p><span><i />{intentResult.recommendation.peerCount > 1 ? `同一时段，还有 ${intentResult.recommendation.peerCount - 1} 位同学选择相同方向` : "你的选择已加入当前时段的需求聚合"}</span></div>
+                <div className="match-recommendation-reason">
+                  <small>为什么是这里</small>
+                  <p>{intentResult.recommendation.reason}</p>
+                  <span><i />{intentResult.recommendation.freeSeats} / {intentResult.recommendation.totalSeats} 个座位可用 · {intentResult.recommendation.peerCount > 0 ? `${intentResult.recommendation.peerCount} 人同方向需求` : "暂无其他同方向需求"}</span>
+                  {intentResult.recommendation.includesDemoBaseline && <em className="match-demo-baseline">含演示基线</em>}
+                </div>
               </div>
-              <footer><span>只呈现趋势，不展示个人身份</span><button onClick={openRecommendedArea}>在地图中定位 <i>→</i></button></footer>
+              <div className="match-factors" aria-label="推荐评分贡献">
+                <span><small>场景适配</small><b>+{intentResult.recommendation.factors.sceneFit}</b></span>
+                <span><small>时段空位</small><b>+{intentResult.recommendation.factors.availability}</b></span>
+                <span><small>同向需求</small><b>+{intentResult.recommendation.factors.peerDemand}</b></span>
+              </div>
+              {intentResult.alternatives.length > 0 && (
+                <div className="match-alternatives">
+                  <small>备选区域</small>
+                  <div>{intentResult.alternatives.map((candidate) => (
+                    <button key={`${candidate.floor}-${candidate.zone}`} onClick={() => openRecommendedArea(candidate)}>
+                      <span><strong>{candidate.zoneName}</strong><small>{candidate.floor} · {candidate.zone}区</small></span>
+                      <span><b>{candidate.score.toFixed(1)} 分</b><small>{candidate.freeSeats} 个空位</small></span>
+                      {candidate.includesDemoBaseline && <em className="match-demo-baseline">含演示基线</em>}
+                      <i>定位 →</i>
+                    </button>
+                  ))}</div>
+                </div>
+              )}
+              <footer><span>只呈现区域趋势，不展示个人身份</span><button onClick={() => openRecommendedArea(intentResult.recommendation)}>在地图中定位 <i>→</i></button></footer>
             </div>
           ) : (
             <div className="match-question">
@@ -1150,15 +1268,16 @@ function SeatsView({
             </div>
           </div>
           <div className="map-summary-bar">
-            <div className="seat-legend"><span><i className="free" />空闲</span><span><i className="busy" />使用中</span><span><i className="away" />暂离</span><span><i className="chosen" />已选择</span></div>
+            <div className="seat-legend"><span><i className="free" />空闲</span><span><i className="busy" />使用中</span><span><i className="away" />暂离</span><span><i className="reserved" />已预约</span><span><i className="chosen" />已选择</span></div>
             <div className="map-quick-counts">
               <span><b>{statusCounts.free}</b> 空闲</span>
               <span><b>{statusCounts.using}</b> 使用中</span>
               <span><b>{statusCounts.away}</b> 暂离</span>
+              <span><b>{statusCounts.reserved}</b> 已预约</span>
             </div>
-            <small><i /> {loadingSeats ? "读取中" : "实时更新"}</small>
+            <small className="seat-refresh-time"><i /> {loadingSeats ? "读取中" : lastUpdatedLabel ? `更新于 ${lastUpdatedLabel}` : "实时更新"}</small>
           </div>
-          {loadingSeats ? <div className="map-loading">正在加载 {currentFloorName} 平面图…</div> : <div className="map-preview"><SeatMap seats={seats} selected={selected} setSelected={setSelected} zoom={1} recommendedZone={intentResult?.recommendation.floor === floor ? intentResult.recommendation.zone : null} /></div>}
+          {loadingSeats ? <div className="map-loading">正在加载 {currentFloorName} 平面图…</div> : <div className="map-preview"><SeatMap seats={seats} selected={selected} setSelected={setSelected} zoom={1} recommendedZone={recommendedZone} /></div>}
         </section>
 
         <aside className="booking-panel">
@@ -1192,13 +1311,13 @@ function SeatsView({
             </header>
 
             <div className="expanded-map-meta">
-              <div className="seat-legend"><span><i className="free" />空闲</span><span><i className="busy" />使用中</span><span><i className="away" />暂离</span><span><i className="chosen" />已选择</span></div>
-              <div className="expanded-counts"><span><b>{statusCounts.free}</b> 空闲</span><span>{statusCounts.using} 使用中</span><span>{statusCounts.away} 暂离</span></div>
+              <div className="seat-legend"><span><i className="free" />空闲</span><span><i className="busy" />使用中</span><span><i className="away" />暂离</span><span><i className="reserved" />已预约</span><span><i className="chosen" />已选择</span></div>
+              <div className="expanded-counts"><span><b>{statusCounts.free}</b> 空闲</span><span>{statusCounts.using} 使用中</span><span>{statusCounts.away} 暂离</span><span>{statusCounts.reserved} 已预约</span></div>
               <strong>{selectedSeat ? `已选择 ${floor} · ${selectedSeat.label}` : "请点击一个空闲座位"}</strong>
             </div>
 
             <div className="expanded-map-viewport">
-              <SeatMap seats={seats} selected={selected} setSelected={setSelected} zoom={expandedZoom} recommendedZone={intentResult?.recommendation.floor === floor ? intentResult.recommendation.zone : null} />
+              <SeatMap seats={seats} selected={selected} setSelected={setSelected} zoom={expandedZoom} recommendedZone={recommendedZone} />
             </div>
 
             <footer className="expanded-map-footer">
