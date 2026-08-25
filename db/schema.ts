@@ -131,3 +131,21 @@ export const communityMessages = sqliteTable(
   },
   (table) => [index("idx_community_messages_room_id").on(table.room, table.id)],
 );
+
+export const activityEvents = sqliteTable(
+  "activity_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }),
+    eventType: text("event_type").notNull(),
+    entityType: text("entity_type"),
+    entityId: text("entity_id"),
+    metadataJson: text("metadata_json"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_activity_events_user_created").on(table.userId, table.createdAt),
+    index("idx_activity_events_type_created").on(table.eventType, table.createdAt),
+    index("idx_activity_events_entity").on(table.entityType, table.entityId),
+  ],
+);

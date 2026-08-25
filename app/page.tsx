@@ -13,8 +13,11 @@ import {
 } from "../lib/library/time";
 import type { Candidate as StudyCandidate } from "../lib/study-match/engine";
 import { MotionStage } from "./motion-stage";
+import { LibrarianView } from "../components/libraryos/LibrarianView";
+import { KnowledgeTwin } from "../components/libraryos/KnowledgeTwin";
+import { IntelligenceView } from "../components/libraryos/IntelligenceView";
 
-type View = "home" | "seats" | "books" | "community" | "mine";
+type View = "home" | "seats" | "books" | "community" | "mine" | "librarian" | "intelligence";
 type BookCategory = "全部" | "文学" | "社科" | "设计" | "科技";
 
 type User = { id: number; studentId: string; name: string };
@@ -447,6 +450,7 @@ function Header({ view, setView, user, onLogout }: { view: View; setView: (view:
     { id: "books", label: "借书" },
     { id: "seats", label: "占座" },
     { id: "community", label: "社区" },
+    { id: "librarian", label: "AI馆员" },
     { id: "mine", label: "我的" },
   ];
 
@@ -507,6 +511,12 @@ function HomeView({
         <h1>今天来图书馆，想先做什么？</h1>
         <p>找一本书，或者选个座位开始学习。</p>
       </header>
+
+      <button className="libraryos-home-entry" onClick={() => setView("librarian")}>
+        <span>LIBRARYOS / ACTION AI LIBRARIAN</span>
+        <strong>不必先选择功能，先告诉图书馆你想完成什么。 <i>→</i></strong>
+        <small>知识 × 空间 × 同伴，一次编排为可执行行动。</small>
+      </button>
 
       <section className="portal-primary-grid" aria-label="主要图书馆服务">
         <button className="portal-card portal-choice portal-books" onClick={() => setView("books")}>
@@ -1412,6 +1422,7 @@ function BooksView({
   function search(value: string) {
     const nextQuery = value.trim();
     if (!nextQuery) return;
+    void fetch("/api/libraryos/activity", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ eventType: "book_search", query: nextQuery }) });
     setInput(nextQuery);
     setQuery(nextQuery);
     setHasSearched(true);
@@ -1681,6 +1692,7 @@ function MineView({
           <p>可用于闸机入馆、自助借书和座位签到</p>
         </aside>
       </div>
+      <KnowledgeTwin />
     </main>
   );
 }
@@ -1821,9 +1833,11 @@ export default function Home() {
         {view === "seats" && <SeatsView reservation={reservation} onReservationChange={setReservation} showToast={showToast} />}
         {view === "books" && <BooksView initialQuery="" borrowed={borrowed} onBorrow={addBorrowed} showToast={showToast} />}
         {view === "community" && <CommunityView reservation={reservation} showToast={showToast} user={user} />}
+        {view === "librarian" && <LibrarianView onNavigate={setView} />}
+        {view === "intelligence" && <IntelligenceView />}
         {view === "mine" && <MineView reservation={reservation} onCancelReservation={cancelReservation} onCheckoutReservation={checkoutReservation} checkoutPending={checkoutPending} borrowed={borrowed} showToast={showToast} user={user} />}
       </MotionStage>
-      <footer className="site-footer"><span>大连理工大学图书馆</span><p>馆藏服务 · 座位预约 · 社区连接</p><button onClick={() => setView("community")}>使用帮助</button></footer>
+      <footer className="site-footer"><span>大连理工大学图书馆</span><p>馆藏服务 · 座位预约 · 社区连接</p><button onClick={() => setView("intelligence")}>运营洞察</button></footer>
       {toast && <div className="toast" role="status"><i>✓</i>{toast}</div>}
       {celebration && <CheckoutCelebration seat={celebration.seat} onClose={() => setCelebration(null)} />}
     </div>

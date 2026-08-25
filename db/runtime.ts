@@ -98,6 +98,15 @@ async function bootstrap() {
       is_anonymous INTEGER NOT NULL DEFAULT 0 CHECK(is_anonymous IN (0, 1)),
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS activity_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL,
+      entity_type TEXT,
+      entity_id TEXT,
+      metadata_json TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)"),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_seats_floor_status ON seats(floor, status)"),
@@ -109,6 +118,9 @@ async function bootstrap() {
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_study_intents_matching ON study_intents(booking_date, time_slot, purpose, topic)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_community_orders_user_created ON community_orders(user_id, created_at)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_community_messages_room_id ON community_messages(room, id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS idx_activity_events_user_created ON activity_events(user_id, created_at)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS idx_activity_events_type_created ON activity_events(event_type, created_at)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS idx_activity_events_entity ON activity_events(entity_type, entity_id)"),
   ]);
 
   const messageColumns = await d1.prepare("PRAGMA table_info(community_messages)").all<{ name: string }>();

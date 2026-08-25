@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 import { retrieveKnowledge } from "../../../../lib/knowledge/library-kb";
 import { getSessionUser } from "../../../../lib/server/auth";
+import { recordActivity } from "../../../../lib/libraryos/activity";
+import { inferTopics } from "../../../../lib/libraryos/catalog.js";
 
 type OpenAIResponse = {
   output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>;
@@ -25,6 +27,7 @@ export async function POST(request: Request) {
   }
 
   const chunks = retrieveKnowledge(question, 3);
+  void recordActivity({ userId: user.id, eventType: "assistant_question", entityType: "knowledge_query", metadata: { topic: inferTopics(question)[0] } });
   const sources = chunks.map(({ id, title }) => ({ id, title }));
   const context = chunks.map((chunk, index) => `[资料 ${index + 1}｜${chunk.title}]\n${chunk.content}`).join("\n\n");
   const runtimeEnv = env as unknown as Record<string, unknown>;

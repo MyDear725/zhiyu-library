@@ -1,6 +1,7 @@
 import { getD1 } from "../../../db";
 import { ensureDatabase } from "../../../db/runtime";
 import { getSessionUser } from "../../../lib/server/auth";
+import { recordActivity } from "../../../lib/libraryos/activity";
 
 export async function GET(request: Request) {
   const user = await getSessionUser(request);
@@ -20,5 +21,6 @@ export async function POST(request: Request) {
   if (!Number.isInteger(bookId) || bookId < 1) return Response.json({ error: "图书编号无效" }, { status: 400 });
   await getD1().prepare("INSERT OR IGNORE INTO borrow_list (user_id, book_id) VALUES (?, ?)")
     .bind(user.id, bookId).run();
+  void recordActivity({ userId: user.id, eventType: "book_added", entityType: "book", entityId: bookId, metadata: { bookId } });
   return Response.json({ ok: true }, { status: 201 });
 }

@@ -1,6 +1,7 @@
 import { getD1 } from "../../../../db";
 import { ensureDatabase } from "../../../../db/runtime";
 import { getSessionUser } from "../../../../lib/server/auth";
+import { recordActivity } from "../../../../lib/libraryos/activity";
 
 const rooms = new Set(["study", "course", "hackathon"]);
 
@@ -61,6 +62,7 @@ export async function POST(request: Request) {
 
   const result = await getD1().prepare("INSERT INTO community_messages (user_id, room, content, is_anonymous) VALUES (?, ?, ?, ?)")
     .bind(user.id, room, content, isAnonymous ? 1 : 0).run();
+  void recordActivity({ userId: user.id, eventType: "community_posted", entityType: "community_room", entityId: room, metadata: { room, anonymous: isAnonymous } });
   return Response.json({ message: {
     id: Number(result.meta.last_row_id), userId: isAnonymous ? null : user.id,
     name: isAnonymous ? "匿名同学" : user.name, studentId: isAnonymous ? null : user.studentId,

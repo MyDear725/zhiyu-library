@@ -2,6 +2,7 @@ import { getD1 } from "../../../db";
 import { ensureDatabase } from "../../../db/runtime";
 import { isLibraryTimeSlot, isLibraryToday } from "../../../lib/library/time";
 import { getSessionUser } from "../../../lib/server/auth";
+import { recordActivity } from "../../../lib/libraryos/activity";
 
 type ReservationRow = {
   id: number;
@@ -55,6 +56,7 @@ export async function POST(request: Request) {
     const result = await getD1().prepare(`INSERT INTO reservations
       (user_id, seat_id, booking_date, time_slot, status) VALUES (?, ?, ?, ?, 'active')`)
       .bind(user.id, seatId, bookingDate, timeSlot).run();
+    void recordActivity({ userId: user.id, eventType: "reservation_created", entityType: "seat", entityId: seatId, metadata: { floor: seat.floor, zone: seat.zone, timeSlot } });
     return Response.json({ reservation: {
       id: Number(result.meta.last_row_id), bookingDate, timeSlot,
       floor: seat.floor, seatLabel: seat.label, zone: seat.zone,

@@ -8,6 +8,7 @@ import {
   type StudyTopic,
   type ZoneAvailability,
 } from "../../../lib/study-match/engine";
+import { recordActivity } from "../../../lib/libraryos/activity";
 
 type IntentRow = {
   purpose: StudyPurpose;
@@ -164,5 +165,6 @@ export async function POST(request: Request) {
       intent.recommendation.zone,
     )
     .run();
-  return Response.json({ intent });
+void recordActivity({ userId: user.id, eventType: "study_intent_saved", entityType: "study_intent", metadata: { purpose, topic: storedTopic, timeSlot } });
+return Response.json({ intent });
 }
